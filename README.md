@@ -159,7 +159,7 @@ Each Sequence wallet is defined by an image hash that encodes its owner configur
 
 ### Deterministic Wallet Address per Config
 
-Given the above, a particular signer configuration always corresponds to a single unique wallet address. The factory uses the image hash as a salt to deploy the wallet, meaning the mapping between a wallet’s config and its address is one-to-one. This prevents an attacker from, say, front-running the deployment of a user’s wallet with a different contract – the address is predetermined by the intended signers. No two distinct configs will produce the same address, and the same config cannot be deployed twice on the same network.
+Given the above, a particular signer configuration always corresponds to a single unique wallet address. The factory uses the image hash as a salt to deploy the wallet, meaning the mapping between a wallet’s config and its address is one-to-one. This prevents an attacker from, say, front-running the deployment of a user’s wallet with a different contract – the address is predetermined by the intended signers. No two distinct configs will produce the same address, and the same config cannot be deployed twice on the same network. After deployment, two wallets could upgrade their image hash to the same configuration.
 
 ### Strict Nonce Sequencing
 
@@ -177,13 +177,21 @@ Sensitive operations on the wallet (such as upgrading the implementation, adding
 
 Users interact with their Sequence wallet exclusively via the execute function (or meta-transaction workflows that ultimately call execute). There is no alternative public method to trigger arbitrary calls from the wallet without signature verification. Even batched calls are executed internally by _execute after the signature and nonce have been validated. This invariant means there’s no “backdoor” to bypass authentication – every funds transfer or contract call from the wallet is explicitly authorized by the wallet’s signers.
 
+### ERC-4337 Integration
+
+Sequence wallets fully support ERC-4337 account abstraction by implementing the required validateUserOp interface. When a User Operation is submitted through an ERC-4337 entrypoint, the wallet validates that the sender is the configured entrypoint contract and processes the operation through the executeUserOp function. The validateUserOp function calls the wallet's own ERC-1271 isValidSignature function to validate signature correctness, where the signature is of the userOpHash rather than the Payload contents. This design protects against replay attacks by ensuring that signatures are bound to the specific User Operation hash, which includes critical fields like nonce, gas parameters, and operation data. The User Operation's data field contains a nested Sequence Payload, which gets forwarded to the wallet's selfExecute function. This selfExecute call follows the same execution flow as the standard _execute function described above. This invariant guarantees that ERC-4337 operations maintain the same security guarantees as direct wallet interactions – the account abstraction layer cannot bypass the wallet's core authentication mechanisms or authorization requirements.
+
 ### Batched Transactions & Atomicity
 
 The wallet supports batching multiple actions in a single execute call for efficiency. By default, the batch is atomic – if any call in the batch fails and is marked as critical, the entire batch will revert. However, the wallet allows certain calls to be flagged as non-critical (revertOnError = false), in which case a failure of that call will not stop the batch: it will emit a TxFailed event for that specific sub-transaction and continue with the next one. This invariant ensures that optional or best-effort operations can be attempted without jeopardizing the main transaction, while still transparently logging any failures. Importantly, a sub-call failing without revertOnError cannot corrupt subsequent calls – the revert is trapped and the wallet moves on, maintaining overall state consistency for the rest of the batch.
 
 ### Contract Signers and ERC-1271
 
-Sequence wallets can have other smart-contract wallets or contracts as signers (not just EOAs), and the wallet fully supports nested signatures via ERC-1271. If a signer is a contract, the Sequence wallet will call that contract’s isValidSignature method to confirm that the payload was approved by that contract’s logic. A contract signer only counts as valid if its own internal approval check returns true, per ERC-1271. This means adding a contract (even another Sequence wallet) as a signer does not bypass the signature requirement – it simply shifts it to that contract’s own signature/approval mechanism. The system even supports multiple layers of nested Sequence wallets as signers, as covered in tests (e.g. wallets signing for wallets), all of which must resolve to true approvals. Invariantly, a signature from a contract signer is treated with the same rigor as a human signer: no contract signer can “auto-approve” transactions unless explicitly programmed to, and it cannot be used to circumvent the threshold or nonce rules.
+Sequence wallets can have other smart-contract wallets or contracts as signers (not just EOAs), and the wallet fully supports nested signatures via ERC-1271 and the new Sapient Signer interface. If a signer is a contract, the Sequence wallet will call that contract’s isValidSignature method to confirm that the payload was approved by that contract’s logic. A contract signer only counts as valid if its own internal approval check returns true, per ERC-1271. This means adding a contract (even another Sequence wallet) as a signer does not bypass the signature requirement – it simply shifts it to that contract’s own signature/approval mechanism. The system even supports multiple layers of nested Sequence wallets as signers, as covered in tests (e.g. wallets signing for wallets), all of which must resolve to true approvals. Invariantly, a signature from a contract signer is treated with the same rigor as a human signer: no contract signer can “auto-approve” transactions unless explicitly programmed to, and it cannot be used to circumvent the threshold or nonce rules.
+
+### Sapient Signers
+
+Sapient signers represent an advanced interface designed to support more complex Sequence wallet signer configurations. While ERC-1271 can only validate a hash and signature by returning the magic value, a Sapient Signer receives the complete transaction payload and signature and is expected to return its configuration or image hash. This returned image hash is then used by the Sequence wallet to reconstruct the wallet's image hash. Since the signer's image hash is derived for every payload and signature combination, a sapient signer can counterfactually determine its image hash without relying on on-chain state. This capability is achieved by encoding the intended sapient signer configuration directly within the signature being validated. As a result, a wallet can support a specific configuration of the sapient signer without requiring updates to that contract's state, enabling more flexible and gas-efficient signer management. The sapient signer may validate the contents of the payload or signature in whichever way it deems fit.
 
 ### Controlled Module Hooks
 
@@ -223,7 +231,7 @@ This command can be issued to execute any tests within the repository:
 forge test
 ```
 
-While several tests may indicate failure, they are failing due to an infrastructure issue during parallel execution and can be safely ignored.
+While several tests may indicate failure, they are failing due to a lack of local infrastructure and can be safely ignored.
 
 If desired, these tests can be successfully executed if a custom RPC server is setup as described in the next steps.
 
