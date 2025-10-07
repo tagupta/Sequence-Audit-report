@@ -1,61 +1,178 @@
-# ✨ So you want to run an audit
-
-This `README.md` contains a set of checklists for our audit collaboration. This is your audit repo, which is used for scoping your audit and for providing information to wardens
-
-Some of the checklists in this doc are for our scouts and some of them are for **you as the audit sponsor (⭐️)**.
-
----
-
-# Repo setup
-
-## ⭐️ Sponsor: Add code to this repo
-
-- [ ] Create a PR to this repo with the below changes:
-- [ ] Confirm that this repo is a self-contained repository with working commands that will build (at least) all in-scope contracts, and commands that will run tests producing gas reports for the relevant contracts.
-- [ ] Please have final versions of contracts and documentation added/updated in this repo **no less than 48 business hours prior to audit start time.**
-- [ ] Be prepared for a 🚨code freeze🚨 for the duration of the audit — important because it establishes a level playing field. We want to ensure everyone's looking at the same code, no matter when they look during the audit. (Note: this includes your own repo, since a PR can leak alpha to our wardens!)
-
-## ⭐️ Sponsor: Repo checklist
-
-- [ ] Modify the [Overview](#overview) section of this `README.md` file. Describe how your code is supposed to work with links to any relevant documentation and any other criteria/details that the auditors should keep in mind when reviewing. (Here are two well-constructed examples: [Ajna Protocol](https://github.com/code-423n4/2023-05-ajna) and [Maia DAO Ecosystem](https://github.com/code-423n4/2023-05-maia))
-- [ ] Optional: pre-record a high-level overview of your protocol (not just specific smart contract functions). This saves wardens a lot of time wading through documentation.
-- [ ] Review and confirm the details created by the Scout (technical reviewer) who was assigned to your contest. *Note: any files not listed as "in scope" will be considered out of scope for the purposes of judging, even if the file will be part of the deployed contracts.*  
-
----
-
-# Sponsorname audit details
-- Total Prize Pool: XXX XXX USDC (Notion: Total award pool)
-  - HM awards: up to XXX XXX USDC (Notion: HM (main) pool)
+# Sequence audit details
+- Total Prize Pool: $73,000 in USDC
+  - HM awards: up to $67,200 in USDC 
     - If no valid Highs or Mediums are found, the HM pool is $0 
-  - QA awards: XXX XXX USDC (Notion: QA pool)
-  - Judge awards: XXX XXX USDC (Notion: Judge Fee)
-  - Scout awards: $500 USDC (Notion: Scout fee - but usually $500 USDC)
-  - (this line can be removed if there is no mitigation) Mitigation Review: XXX XXX USDC
+  - QA awards: $2,800 in USDC
+  - Judge awards: $2,500 in USDC
+  - Scout awards: $500 in USDC
 - [Read our guidelines for more details](https://docs.code4rena.com/competitions)
-- Starts XXX XXX XX 20:00 UTC (ex. `Starts March 22, 2023 20:00 UTC`)
-- Ends XXX XXX XX 20:00 UTC (ex. `Ends March 30, 2023 20:00 UTC`)
+- Starts October 7, 2025 20:00 UTC 
+- Ends October 22, 2025 20:00 UTC 
 
 **❗ Important notes for wardens** 
-## 🐺 C4 staff: delete the PoC requirement section if not applicable - i.e. for non-Solidity/EVM audits.
 1. A coded, runnable PoC is required for all High/Medium submissions to this audit. 
   - This repo includes a basic template to run the test suite.
   - PoCs must use the test suite provided in this repo.
   - Your submission will be marked as Insufficient if the POC is not runnable and working with the provided test suite.
   - Exception: PoC is optional (though recommended) for wardens with signal ≥ 0.68.
-1. Judging phase risk adjustments (upgrades/downgrades):
+2. Judging phase risk adjustments (upgrades/downgrades):
   - High- or Medium-risk submissions downgraded by the judge to Low-risk (QA) will be ineligible for awards.
   - Upgrading a Low-risk finding from a QA report to a Medium- or High-risk finding is not supported.
   - As such, wardens are encouraged to select the appropriate risk level carefully during the submission phase.
+
 
 ## Automated Findings / Publicly Known Issues
 
 The 4naly3er report can be found [here](https://github.com/code-423n4/YYYY-MM-contest-candidate/blob/main/4naly3er-report.md).
 
 _Note for C4 wardens: Anything included in this `Automated Findings / Publicly Known Issues` section is considered a publicly known issue and is ineligible for awards._
-## 🐺 C4: Begin Gist paste here (and delete this line)
 
+* There are multiple ways for a user to brick the wallet (e.g., setting an invalid imageHash, using a set of signers that doesn't reach the threshold, losing the contents of the tree, etc.); these contracts are meant to be used with an SDK that guards against those scenarios, which are beyond the scope of the audit.
+* Hooks are meant to have admin privileges; it is expected that once installed, they have full rein to affect the wallet. The SDK guards against installing non-whitelisted hooks.
+* Rule changes immediately reset usage limits for a permission; this is a known issue.
+* It is possible to define a configuration tree so large that attempting to use it may cause out-of-gas errors; this is a known issue and the SDK guards against that scenario.
+* Calls with value are not forwarded to the implementation; this is by design. The `payable` modifiers are a gas optimization to avoid checking `msg.value` twice.
+* When sending a transaction, the signers have free rein to update the wallet configuration and implementation; this is by design. The calls can be restricted if needed using sapient signers.
+* Exploits that involve tricking a relayer into relaying a transaction that fails and never pays for gas are out of scope; the relayer has its own layer of protections that are independent from the contracts.
+* It is possible to desync the wallet across chains if the signers sign configuration updates with `chainId != 0`, or if they perform a one-off configuration or implementation update on-chain. The signers are responsible for not doing this to keep the chains in sync; the SDK handles it automatically.
+* The `Estimator.sol`, `Guest.sol`, and `Simulator.sol` contracts are considered out of scope; they are non-privileged.
+* Intermediary configurations of the state channel (that haven't been invalidated by the checkpointer) are usable. To properly evict a removed signer, the configuration has to be updated on-chain or the checkpointer must reflect the change.
+* Signature malleability is not a concern, as signatures are not expected to be unique.
 
+✅ SCOUTS: Please format the response above 👆 so its not a wall of text and its readable.
 
+# Overview
+
+[ ⭐️ SPONSORS: add info here ]
+
+## Links
+
+- **Previous audits:**  Audits can be found here: https://github.com/0xsequence/wallet-contracts-v3/tree/master/audits
+  - ✅ SCOUTS: If there are multiple report links, please format them in a list.
+- **Documentation:** https://github.com/0xsequence/wallet-contracts-v3/tree/master/docs
+- **Website:** https://sequence.xyz/
+- **X/Twitter:** https://x.com/0xsequence
+
+---
+
+# Scope
+
+[ ✅ SCOUTS: add scoping and technical details here ]
+
+### Files in scope
+- ✅ This should be completed using the `metrics.md` file
+- ✅ Last row of the table should be Total: SLOC
+- ✅ SCOUTS: Have the sponsor review and and confirm in text the details in the section titled "Scoping Q amp; A"
+
+*For sponsors that don't use the scoping tool: list all files in scope in the table below (along with hyperlinks) -- and feel free to add notes to emphasize areas of focus.*
+
+| Contract | SLOC | Purpose | Libraries used |  
+| ----------- | ----------- | ----------- | ----------- |
+| [contracts/folder/sample.sol](https://github.com/code-423n4/repo-name/blob/contracts/folder/sample.sol) | 123 | This contract does XYZ | [`@openzeppelin/*`](https://openzeppelin.com/contracts/) |
+
+### Files out of scope
+✅ SCOUTS: List files/directories out of scope
+
+# Additional context
+
+## Areas of concern (where to focus for bugs)
+1. Privilege escalation either from a signer that belongs to the configuration or from a non-signer, allowing it to sign transactions on behalf of the wallet bypassing the threshold.
+2. Correctness of the checkpointer and the chained signatures.
+3. Malleability of packed payloads.
+4. Privilege escalation within smart sessions.
+5. Timelock bypasses on the recovery module.
+
+✅ SCOUTS: Please format the response above 👆 so its not a wall of text and its readable.
+
+## Main invariants
+
+* Authorized Signers Only: Only the wallet’s designated signers (meeting the required signing threshold) can execute transactions or make state changes. No external party can operate the wallet without a valid EIP-712 signature from the correct signer set. The contract enforces this by requiring a proper signature for every execute call – if the signature check fails, the transaction is rejected.
+* Image Hash & Configuration Integrity: Each Sequence wallet is defined by an image hash that encodes its owner configuration (the set of signer addresses and their threshold scheme). This image hash is tied to the wallet’s deployment address. On deployment, the wallet contract checks that its own address was generated using the image hash (via CREATE2 with the factory) and stores this hash on-chain. Every future transaction recomputes the image hash from the current config and compares it to the stored value, ensuring the signer set or threshold cannot be tampered with undetected. In short, the wallet’s address and its authorized signer configuration are cryptographically bound – any unauthorized change breaks the hash check and invalidates signatures.
+* Deterministic Wallet Address per Config: Given the above, a particular signer configuration always corresponds to a single unique wallet address. The factory uses the image hash as a salt to deploy the wallet, meaning the mapping between a wallet’s config and its address is one-to-one. This prevents an attacker from, say, front-running the deployment of a user’s wallet with a different contract – the address is predetermined by the intended signers. No two distinct configs will produce the same address, and the same config cannot be deployed twice on the same network.
+* Strict Nonce Sequencing: Sequence wallets implement a multi-space nonce system to prevent replay attacks. Each wallet has independent nonce “spaces” (to allow parallel sequence streams), and in each space the nonce must match exactly the next expected value. Nonces increment sequentially per space and cannot be reused. If a transaction’s provided nonce is out of sequence for that space, it will be rejected as an INVALID_NONCE. This invariant guarantees proper ordering of transactions and that each signed transaction is unique to a single execution.
+* Domain-Separated Signatures: All signatures are domain-separated and network-specific. The wallet’s EIP-712 signing scheme includes the current chain ID and the wallet’s address in the hashed message. This means a signature intended for one particular Sequence wallet on one network cannot be replayed on a different wallet or chain. The contract explicitly pulls the chain ID in at hash time and prefixes the data with 0x19_01 || chainId || address(this), binding the signature to that wallet instance. This invariant protects against cross-chain or cross-contract replay of signed messages.
+* Privileged Operations Require Self-Call: Sensitive operations on the wallet (such as upgrading the implementation, adding/removing module hooks, or deploying new contracts from the wallet) are guarded by a modifier onlySelf. This means the function can only be called by the wallet itself (i.e. via an internal delegatecall from the wallet’s own context) and never by an external EOA or unprivileged contract . For example, the updateImplementation function (used to upgrade the wallet’s logic) is onlySelf, so it can only execute if initiated from an authorized wallet transaction, and cannot be invoked by an attacker directly. This invariant ensures no admin or external contract can unilaterally change the wallet’s state – only the wallet’s owners, via a proper signed transaction, can trigger such changes.
+* All External Actions Go Through execute: Users interact with their Sequence wallet exclusively via the execute function (or meta-transaction workflows that ultimately call execute). There is no alternative public method to trigger arbitrary calls from the wallet without signature verification. Even batched calls are executed internally by _execute after the signature and nonce have been validated. This invariant means there’s no “backdoor” to bypass authentication – every funds transfer or contract call from the wallet is explicitly authorized by the wallet’s signers.
+* Batched Transactions & Atomicity: The wallet supports batching multiple actions in a single execute call for efficiency. By default, the batch is atomic – if any call in the batch fails and is marked as critical, the entire batch will revert. However, the wallet allows certain calls to be flagged as non-critical (revertOnError = false), in which case a failure of that call will not stop the batch: it will emit a TxFailed event for that specific sub-transaction and continue with the next one. This invariant ensures that optional or best-effort operations can be attempted without jeopardizing the main transaction, while still transparently logging any failures. Importantly, a sub-call failing without revertOnError cannot corrupt subsequent calls – the revert is trapped and the wallet moves on, maintaining overall state consistency for the rest of the batch.
+* Contract Signers and ERC-1271: Sequence wallets can have other smart-contract wallets or contracts as signers (not just EOAs), and the wallet fully supports nested signatures via ERC-1271. If a signer is a contract, the Sequence wallet will call that contract’s isValidSignature method to confirm that the payload was approved by that contract’s logic. A contract signer only counts as valid if its own internal approval check returns true, per ERC-1271. This means adding a contract (even another Sequence wallet) as a signer does not bypass the signature requirement – it simply shifts it to that contract’s own signature/approval mechanism. The system even supports multiple layers of nested Sequence wallets as signers, as covered in tests (e.g. wallets signing for wallets), all of which must resolve to true approvals. Invariantly, a signature from a contract signer is treated with the same rigor as a human signer: no contract signer can “auto-approve” transactions unless explicitly programmed to, and it cannot be used to circumvent the threshold or nonce rules.
+* Controlled Module Hooks: The wallet allows installing hook modules to handle specific function selectors (for example, to custom-handle incoming token transfers or to extend wallet functionality). These hooks are strictly controlled by the wallet’s owners. Only one hook implementation can be registered per function signature at any time, and adding or removing a hook can only be done via a valid wallet transaction (which, as noted, requires signer authorization and onlySelf). If a hook is set for a function, the wallet’s fallback will delegatecall into the hook’s contract when that function is invoked; if no hook is set, such calls are simply ignored by the wallet’s fallback (no action taken, aside from possibly receiving ETH). Hooks do not get to override the wallet’s security model – they execute within the wallet context under the same onlySelf restrictions for any state changes. In essence, a hook can extend functionality but cannot, for example, surreptitiously initiate an execute on its own. The invariant here is that hooks augment the wallet but cannot violate its core access controls.
+* Non-Privileged Helper Modules: The Sequence system includes certain helper modules (e.g. Estimator, Simulator, and a Guest module for new wallets) which have no privileged rights in the protocol. These components are used for off-chain simulation, gas estimation or temporary guest session logic, and they cannot modify wallet state or perform sensitive actions. Invariants are not impacted by these modules – they operate with read-only or strictly limited scope. This means auditors and users can largely ignore these modules in terms of security critical paths, as they cannot bypass authorization or affect funds. All the critical invariants remain focused on the core wallet, its factory, and the authorized modules described above.
+
+✅ SCOUTS: Please format the response above 👆 so its not a wall of text and its readable.
+
+## All trusted roles in the protocol
+
+N/A
+
+✅ SCOUTS: Please format the response above 👆 using the template below👇
+
+| Role                                | Description                       |
+| --------------------------------------- | ---------------------------- |
+| Owner                          | Has superpowers                |
+| Administrator                             | Can change fees                       |
+
+✅ SCOUTS: Please format the response above 👆 so its not a wall of text and its readable.
+
+## Running tests
+
+## Development Setup
+
+Install dependencies
+
+```sh
+pnpm install
+```
+
+Git hooks will be automatically installed.
+
+## Testing
+
+Install the [Sequence v3 SDK](https://github.com/0xsequence/sequence.js) and run a server using the following command:
+
+```sh
+cd ../sequence.js
+pnpm build:packages
+pnpm dev:server
+```
+
+Copy the `env.sample` file to `.env` and set the environment variables.
+
+```sh
+cp .env.sample .env
+# Edit .env
+```
+
+Run tests
+
+```sh
+forge test
+```
+
+Run coverage (ignoring scripts and test files).
+
+```sh
+forge coverage --no-match-coverage "(script|test)"
+# Or to generate and view in browser
+forge coverage --no-match-coverage "(script|test)" --report lcov && genhtml -o report --branch-coverage lcov.info && py -m http.server -d report
+```
+
+✅ SCOUTS: Please format the response above 👆 using the template below👇
+
+```bash
+git clone https://github.com/code-423n4/2023-08-arbitrum
+git submodule update --init --recursive
+cd governance
+foundryup
+make install
+make build
+make sc-election-test
+```
+To run code coverage
+```bash
+make coverage
+```
+
+✅ SCOUTS: Add a screenshot of your terminal showing the test coverage
 
 
 # Scope
@@ -168,4 +285,11 @@ _Note for C4 wardens: Anything included in this `Automated Findings / Publicly K
 | ./test/utils/PrimitivesRPC.sol |
 | ./test/utils/TestUtils.sol |
 | Totals: 45 |
+
+
+## Miscellaneous
+Employees of Sequence and employees' family members are ineligible to participate in this audit.
+
+Code4rena's rules cannot be overridden by the contents of this README. In case of doubt, please check with C4 staff.
+
 
