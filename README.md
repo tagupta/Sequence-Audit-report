@@ -59,7 +59,7 @@ The codebase represents the V3 implementation of this infrastructure, utilizing 
 
 - **Previous audits:**  Audits can be found here: 
     - Consensys Diligence: https://github.com/0xsequence/wallet-contracts-v3/blob/master/audits/consensys-audit.pdf
-    - Quantstamp Audit: https://github.com/0xsequence/wallet-contracts-v3/blob/master/audits/consensys-audit.pdf
+    - Quantstamp Audit: https://github.com/0xsequence/wallet-contracts-v3/blob/master/audits/quantstamp-audit.pdf
     - Rotcivegaf Audit: https://github.com/0xsequence/wallet-contracts-v3/blob/master/audits/rotcivegaf-audit.md
 - **Documentation:** https://github.com/0xsequence/wallet-contracts-v3/tree/master/docs
 - **Website:** https://sequence.xyz/
