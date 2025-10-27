@@ -84,6 +84,7 @@ library WebAuthn {
   /// - Does NOT verify the attestation object: this assumes that
   ///   response.attestationObject is NOT present in the response,
   ///   i.e. the RP does not intend to verify an attestation.
+  //@audit-med
   function verify(
     bytes memory challenge,
     bool requireUserVerification,
@@ -106,7 +107,7 @@ library WebAuthn {
         mstore(encoded, shr(152, '"challenge":"')) // Temp prefix with '"challenge":"'.
         result :=
           and(
-            // 11. Verify JSON's type. Also checks for possible addition overflows.
+            // 11. Verify JSON's type. Also checks for possible addition overflows.//0x14 => 20
             and(
               eq(shr(88, mload(add(o, t))), shr(88, '"type":"webauthn.get"')), lt(shr(128, or(t, c)), lt(add(0x14, t), n))
             ),
@@ -186,7 +187,7 @@ library WebAuthn {
   ) internal pure returns (WebAuthnAuth memory decoded) {
     /// @solidity memory-safe-assembly
     assembly {
-      for { let n := mload(encodedAuth) } iszero(lt(n, 0xc0)) { } {
+      for { let n := mload(encodedAuth) } iszero(lt(n, 0xc0)) { } { //n < 192
         let o := add(encodedAuth, 0x20) // Start of `encodedAuth`'s bytes.
         let e := add(o, n) // End of `encodedAuth` in memory.
         let p := add(mload(o), o) // Start of `encodedAuth`.

@@ -27,9 +27,11 @@ abstract contract ERC4337v07 is ReentrancyGuard, IAccount, Calls {
   }
 
   /// @inheritdoc IAccount
+  //@audit-q not reentrant protected. A malicious entry point contract can drain the wallet of funds
+  //@note https://solodit.cyfrin.io/issues/h-01-no-check-for-userop-and-userophash-mismatch-nor-the-validity-of-the-sender-shieldify-none-etherspot-credibleaccountmodule-markdown
   function validateUserOp(
     PackedUserOperation calldata userOp,
-    bytes32 userOpHash,
+    bytes32 userOpHash, //hash of userOp - signature, entryPoint, chainID
     uint256 missingAccountFunds
   ) external returns (uint256 validationData) {
     if (entrypoint == address(0)) {
@@ -41,7 +43,7 @@ abstract contract ERC4337v07 is ReentrancyGuard, IAccount, Calls {
     }
 
     // userOp.nonce is validated by the entrypoint
-
+    //@note This makes an external call BEFORE signature validation. An attacker could re-enter during the deposit call
     if (missingAccountFunds != 0) {
       IEntryPoint(entrypoint).depositTo{ value: missingAccountFunds }(address(this));
     }
@@ -71,3 +73,5 @@ abstract contract ERC4337v07 is ReentrancyGuard, IAccount, Calls {
   }
 
 }
+
+//@audit-q this contract itself has got no receive() function to receive native tokens

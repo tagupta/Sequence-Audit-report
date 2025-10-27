@@ -8,6 +8,7 @@ import { Payload } from "../Payload.sol";
 import { ICheckpointer, Snapshot } from "../interfaces/ICheckpointer.sol";
 import { IERC1271, IERC1271_MAGIC_VALUE_HASH } from "../interfaces/IERC1271.sol";
 import { ISapient, ISapientCompact } from "../interfaces/ISapient.sol";
+import {console2} from 'forge-std/console2.sol';
 
 using LibBytes for bytes;
 using Payload for Payload.Decoded;
@@ -39,25 +40,31 @@ library BaseSig {
   error UnusedSnapshot(Snapshot _snapshot);
   /// @notice Error thrown when the signature flag is invalid
   error InvalidSignatureFlag(uint256 _flag);
-
+  
+  //@note The hash of a signer leaf is computed as
   function _leafForAddressAndWeight(address _addr, uint256 _weight) internal pure returns (bytes32) {
     return keccak256(abi.encodePacked("Sequence signer:\n", _addr, _weight));
   }
-
+  
+  //@note The hash of a nested tree is computed as:
+  //@note  this allows for certain sets of signers to be grouped in such a way that their signing power is limited by a threshold.
   function _leafForNested(bytes32 _node, uint256 _threshold, uint256 _weight) internal pure returns (bytes32) {
     return keccak256(abi.encodePacked("Sequence nested config:\n", _node, _threshold, _weight));
   }
-
+  
+  //@note The hash of a sapient signer leaf is:
   function _leafForSapient(address _addr, uint256 _weight, bytes32 _imageHash) internal pure returns (bytes32) {
     return keccak256(abi.encodePacked("Sequence sapient config:\n", _addr, _weight, _imageHash));
   }
-
+  
+  //@note The hash of a hardcoded signature leaf is computed as:
   function _leafForHardcodedSubdigest(
     bytes32 _subdigest
   ) internal pure returns (bytes32) {
     return keccak256(abi.encodePacked("Sequence static digest:\n", _subdigest));
   }
-
+ 
+  //@note The hash of an any address hardcoded signature leaf is computed as:
   function _leafForAnyAddressSubdigest(
     bytes32 _anyAddressSubdigest
   ) internal pure returns (bytes32) {
@@ -106,7 +113,7 @@ library BaseSig {
     }
 
     // If signature type is 01 or 11 we do a chained signature
-    if (signatureFlag & 0x01 == 0x01) {
+    if (signatureFlag & 0x01 == 0x01) { //@note this signarure is chained 
       return recoverChained(_payload, _checkpointer, snapshot, _signature[rindex:]);
     }
 
@@ -198,6 +205,7 @@ library BaseSig {
     bytes32 _opHash,
     bytes calldata _signature
   ) internal view returns (uint256 weight, bytes32 root) {
+    console2.log("reached here");
     unchecked {
       uint256 rindex;
 
@@ -228,9 +236,14 @@ library BaseSig {
           bytes32 r;
           bytes32 s;
           uint8 v;
-          (r, s, v, rindex) = _signature.readRSVCompact(rindex);
-
+          (r, s, v, rindex) = _signature.readRSVCompact(rindex); //read 64 bytes
+          
+          //@note if (signer == address(0)) {
+          //     return (address(0), RecoverError.InvalidSignature, bytes32(0));
+          // }
+          //@audit-med/low the addess zero is not handled
           address addr = ecrecover(_opHash, v, r, s);
+          //@audit-q do we not have a way to validated this recovered address against any address?
 
           weight += addrWeight;
           bytes32 node = _leafForAddressAndWeight(addr, addrWeight);
@@ -323,19 +336,22 @@ library BaseSig {
           rindex = nrindex;
 
           weight += nweight;
+          //@audit-q does this mean to say that the root can not be empty here?
           root = LibOptim.fkeccak256(root, node);
           continue;
         }
 
         // Nested (0x06)
         if (flag == FLAG_NESTED) {
+          //@audit-med this doesn't align with the documentation, incorrect bits read for exteranl weight and internal threshold
           // Unused free bits:
           // - XX00 : Weight (00 = dynamic, 01 = 1, 10 = 2, 11 = 3)
           // - 00XX : Threshold (00 = dynamic, 01 = 1, 10 = 2, 11 = 3)
 
           // Enter a branch of the signature merkle tree
           // but with an internal threshold and an external fixed weight
-          uint256 externalWeight = uint8(firstByte & 0x0c) >> 2;
+          console2.log("Present here");
+          uint256 externalWeight = uint8(firstByte & 0x0c) >> 2; //@note uint8(firstByte & 0x03) => external weight
           if (externalWeight == 0) {
             (externalWeight, rindex) = _signature.readUint8(rindex);
           }
@@ -394,7 +410,8 @@ library BaseSig {
           bytes32 s;
           uint8 v;
           (r, s, v, rindex) = _signature.readRSVCompact(rindex);
-
+          
+          //@audit-low this can return address 0 which is not handled
           address addr = ecrecover(keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", _opHash)), v, r, s);
 
           weight += addrWeight;
@@ -450,8 +467,9 @@ library BaseSig {
           // Call the ERC1271 contract to check if the signature is valid
           bytes32 sapientImageHash = ISapient(addr).recoverSapientSignature(_payload, _signature[rindex:nrindex]);
           rindex = nrindex;
-
+          //@audit-q why this is not validating the value of sapientImageHash?
           // Add the weight and compute the merkle root
+          //@note Weight is added if valid.
           weight += addrWeight;
           bytes32 node = _leafForSapient(addr, addrWeight, sapientImageHash);
           root = root != bytes32(0) ? LibOptim.fkeccak256(root, node) : node;
@@ -482,6 +500,7 @@ library BaseSig {
           uint256 nrindex = rindex + size;
 
           // Call the Sapient contract to check if the signature is valid
+          //@audit-q check the validity of image hash
           bytes32 sapientImageHash =
             ISapientCompact(addr).recoverSapientSignatureCompact(_opHash, _signature[rindex:nrindex]);
           rindex = nrindex;

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.18;
 
-bytes4 constant IERC1271_MAGIC_VALUE_HASH = 0x1626ba7e;
-bytes4 constant IERC1271_MAGIC_VALUE_BYTES = 0x20c13b0b;
+bytes4 constant IERC1271_MAGIC_VALUE_HASH = 0x1626ba7e; // bytes4(keccak256("isValidSignature(bytes32,bytes)")
+bytes4 constant IERC1271_MAGIC_VALUE_BYTES = 0x20c13b0b; //  bytes4(keccak256("isValidSignature(bytes,bytes)")
 
 /// @title IERC1271
 /// @notice Interface for ERC1271

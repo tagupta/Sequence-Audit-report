@@ -85,7 +85,7 @@ contract Recovery is ISapientCompact {
       uint256 flag;
       (flag, rindex) = _signature.readUint8(rindex);
 
-      if (flag == FLAG_RECOVERY_LEAF) {
+      if (flag == FLAG_RECOVERY_LEAF) { //0x01
         // Read the signer and requiredDeltaTime
         address signer;
         uint256 requiredDeltaTime;
@@ -97,6 +97,9 @@ contract Recovery is ISapientCompact {
 
         // Check if we have a queued payload for this signer
         uint256 queuedAt = timestampForQueuedPayload[_wallet][signer][_payloadHash];
+        //@note need to make sure that block.timestamp >= queuedAt
+        //@audit-q since this check is not dependent upon valid signer, can this be bypassed for malicious payload and verified can be set to true
+        //@report-written in v12 output
         if (queuedAt != 0 && queuedAt >= minTimestamp && block.timestamp - queuedAt >= requiredDeltaTime) {
           verified = true;
         }
@@ -106,7 +109,7 @@ contract Recovery is ISapientCompact {
         continue;
       }
 
-      if (flag == FLAG_NODE) {
+      if (flag == FLAG_NODE) {//0x03
         // Read node hash
         bytes32 node;
         (node, rindex) = _signature.readBytes32(rindex);
@@ -121,7 +124,7 @@ contract Recovery is ISapientCompact {
 
         // Enter a branch of the signature merkle tree
         uint256 nrindex = rindex + size;
-
+        //@note the recursion depth can grow excessively
         (bool nverified, bytes32 nroot) = _recoverBranch(_wallet, _payloadHash, _signature[rindex:nrindex]);
         rindex = nrindex;
 
@@ -164,6 +167,7 @@ contract Recovery is ISapientCompact {
   /// @param _signer The signer to queue the payload for
   /// @param _payload The payload to queue
   /// @param _signature The signature to queue the payload for
+  //@audit-q test this if address 0 is passed for signer
   function queuePayload(
     address _wallet,
     address _signer,
@@ -201,6 +205,7 @@ contract Recovery is ISapientCompact {
       (r, s, v,) = _signature.readRSVCompact(0);
 
       address addr = ecrecover(rPayloadHash, v, r, s);
+      //@audit-q can this be exploited for incorrect payload and if signer is passed as address(0)
       if (addr == _signer) {
         return true;
       }

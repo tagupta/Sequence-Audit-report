@@ -31,5 +31,4 @@ interface IPartialAuth {
       uint256 checkpoint,
       bytes32 opHash
     );
-
 }

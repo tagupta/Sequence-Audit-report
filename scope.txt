@@ -1,47 +1,47 @@
-./src/Factory.sol
-./src/Guest.sol
+./src/Factory.sol - //@note OK
+./src/Guest.sol //@note OK
 ./src/Stage1Module.sol
 ./src/Stage2Module.sol
-./src/Wallet.sol
-./src/extensions/passkeys/Passkeys.sol
-./src/extensions/recovery/Recovery.sol
-./src/extensions/sessions/SessionErrors.sol
-./src/extensions/sessions/SessionManager.sol
-./src/extensions/sessions/SessionSig.sol
-./src/extensions/sessions/explicit/ExplicitSessionManager.sol
-./src/extensions/sessions/explicit/IExplicitSessionManager.sol
-./src/extensions/sessions/explicit/Permission.sol
-./src/extensions/sessions/explicit/PermissionValidator.sol
-./src/extensions/sessions/implicit/Attestation.sol
-./src/extensions/sessions/implicit/ISignalsImplicitMode.sol
-./src/extensions/sessions/implicit/ImplicitSessionManager.sol
-./src/modules/Calls.sol
-./src/modules/ERC4337v07.sol
-./src/modules/Hooks.sol
-./src/modules/Implementation.sol
-./src/modules/Nonce.sol
-./src/modules/Payload.sol
-./src/modules/ReentrancyGuard.sol
-./src/modules/Storage.sol
-./src/modules/auth/BaseAuth.sol
-./src/modules/auth/BaseSig.sol
-./src/modules/auth/SelfAuth.sol
-./src/modules/auth/Stage1Auth.sol
-./src/modules/auth/Stage2Auth.sol
-./src/modules/interfaces/IAccount.sol
-./src/modules/interfaces/IAuth.sol
-./src/modules/interfaces/ICheckpointer.sol
-./src/modules/interfaces/IDelegatedExtension.sol
-./src/modules/interfaces/IERC1155Receiver.sol
-./src/modules/interfaces/IERC1271.sol
-./src/modules/interfaces/IERC223Receiver.sol
-./src/modules/interfaces/IERC721Receiver.sol
-./src/modules/interfaces/IERC777Receiver.sol
+./src/Wallet.sol //@note OK
+./src/extensions/passkeys/Passkeys.sol //@note OK
+./src/extensions/recovery/Recovery.sol //@note OK
+./src/extensions/sessions/SessionErrors.sol //@note OK
+./src/extensions/sessions/SessionManager.sol //@note Okish
+./src/extensions/sessions/SessionSig.sol //@note OK
+./src/extensions/sessions/explicit/ExplicitSessionManager.sol //@note OK
+./src/extensions/sessions/explicit/IExplicitSessionManager.sol //@note OK
+./src/extensions/sessions/explicit/Permission.sol //@note OK
+./src/extensions/sessions/explicit/PermissionValidator.sol //@note OK
+./src/extensions/sessions/implicit/Attestation.sol //@note OKs
+./src/extensions/sessions/implicit/ISignalsImplicitMode.sol //@note OK
+./src/extensions/sessions/implicit/ImplicitSessionManager.sol //@note OK
+./src/modules/Calls.sol //@note OK - errors
+./src/modules/ERC4337v07.sol //@note OK
+./src/modules/Hooks.sol //@note OK
+./src/modules/Implementation.sol //@note OK
+./src/modules/Nonce.sol //@note OK
+./src/modules/Payload.sol //@note OK
+./src/modules/ReentrancyGuard.sol //@note OK
+./src/modules/Storage.sol //@note OK
+./src/modules/auth/BaseAuth.sol //@note OK
+./src/modules/auth/BaseSig.sol //@note OK
+./src/modules/auth/SelfAuth.sol //@note OK
+./src/modules/auth/Stage1Auth.sol //@note OK
+./src/modules/auth/Stage2Auth.sol //@note OK
+./src/modules/interfaces/IAccount.sol //@note OK
+./src/modules/interfaces/IAuth.sol //@note OK
+./src/modules/interfaces/ICheckpointer.sol //@note OK
+./src/modules/interfaces/IDelegatedExtension.sol //@note OK
+./src/modules/interfaces/IERC1155Receiver.sol //@note OK
+./src/modules/interfaces/IERC1271.sol //@note OK
+./src/modules/interfaces/IERC223Receiver.sol //@note OK
+./src/modules/interfaces/IERC721Receiver.sol //@note OK
+./src/modules/interfaces/IERC777Receiver.sol //@note OK
 ./src/modules/interfaces/IEntryPoint.sol
 ./src/modules/interfaces/IPartialAuth.sol
-./src/modules/interfaces/ISapient.sol
-./src/utils/Base64.sol
-./src/utils/LibBytes.sol
-./src/utils/LibOptim.sol
-./src/utils/P256.sol
-./src/utils/WebAuthn.sol
+./src/modules/interfaces/ISapient.sol //@note OK
+./src/utils/Base64.sol //@note OK
+./src/utils/LibBytes.sol //@note OK
+./src/utils/LibOptim.sol //@note OK
+./src/utils/P256.sol //@note OK
+./src/utils/WebAuthn.sol //@note NOT OK - revisit

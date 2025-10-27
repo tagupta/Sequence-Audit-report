@@ -30,7 +30,7 @@ library Payload {
         EIP712_DOMAIN_TYPEHASH,
         EIP712_DOMAIN_NAME_SEQUENCE,
         EIP712_DOMAIN_VERSION_SEQUENCE,
-        _noChainId ? uint256(0) : uint256(block.chainid),
+        _noChainId ? uint256(0) : uint256(block.chainid), //@audit-q what if attacker tries to bypass the chain validation for replay attack cross chain?
         _wallet
       )
     );
@@ -136,13 +136,14 @@ library Payload {
     _decoded.kind = KIND_TRANSACTIONS;
 
     // Read the global flag
+    //@note this is reading the firts byte of the payload
     (uint256 globalFlag, uint256 pointer) = packed.readFirstUint8();
 
     // First bit determines if space is zero or not
     if (globalFlag & 0x01 == 0x01) {
       _decoded.space = 0;
     } else {
-      (_decoded.space, pointer) = packed.readUint160(pointer);
+      (_decoded.space, pointer) = packed.readUint160(pointer);//read 20 bytes
     }
 
     // Next 3 bits determine the size of the nonce
@@ -172,6 +173,7 @@ library Payload {
 
     for (uint256 i = 0; i < numCalls; i++) {
       uint8 flags;
+      //@note call flag to fetch after reading the number of count calls value
       (flags, pointer) = packed.readUint8(pointer);
 
       // First bit determines if this is a call to self
@@ -193,12 +195,14 @@ library Payload {
       if (flags & 0x04 == 0x04) {
         // 3 bytes determine the size of the calldata
         uint256 calldataSize;
-        (calldataSize, pointer) = packed.readUint24(pointer);
+        (calldataSize, pointer) = packed.readUint24(pointer); //@note first read 3 bytes for reading the calldata size
+        //@audit-q check for out-of-bounds issue and no validation on the size of the calldata
         _decoded.calls[i].data = packed[pointer:pointer + calldataSize];
         pointer += calldataSize;
       }
 
       // Fourth bit determines if the call has a gas limit or not
+      //@audit-q No validation that gasLimit is reasonable. Could be used in gas exhaustion attacks.
       if (flags & 0x08 == 0x08) {
         (_decoded.calls[i].gasLimit, pointer) = packed.readUint256(pointer);
       }
@@ -210,6 +214,7 @@ library Payload {
       _decoded.calls[i].onlyFallback = (flags & 0x20 == 0x20);
 
       // Last 2 bits are directly mapped to the behavior on error
+      //@audit-q since only 3 error cases are defined, need to check what would happen if error code => 0x04 happens to occur
       _decoded.calls[i].behaviorOnError = (flags & 0xC0) >> 6;
     }
   }
@@ -229,13 +234,15 @@ library Payload {
   ) internal pure returns (bytes32) {
     // In EIP712, an array is often hashed as the keccak256 of the concatenated
     // hashes of each item. So we hash each Call, pack them, and hash again.
+    //@note The array values are encoded as the keccak256 hash of the concatenated encodeData of their contents (i.e. the encoding of SomeType[5] is identical to that of a struct containing five members of type SomeType).
     bytes32[] memory callHashes = new bytes32[](calls.length);
     for (uint256 i = 0; i < calls.length; i++) {
       callHashes[i] = hashCall(calls[i]);
     }
     return keccak256(abi.encodePacked(callHashes));
   }
-
+   
+  //@audit-q is there a way to deal with duplicate wallet addresses
   function toEIP712(
     Decoded memory _decoded
   ) internal pure returns (bytes32) {

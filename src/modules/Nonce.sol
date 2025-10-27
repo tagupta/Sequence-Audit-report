@@ -32,11 +32,13 @@ contract Nonce {
 
   function _consumeNonce(uint256 _space, uint256 _nonce) internal {
     uint256 currentNonce = readNonce(_space);
+    //@note the stored value must match with the passed value
     if (currentNonce != _nonce) {
       revert BadNonce(_space, _nonce, currentNonce);
     }
 
     unchecked {
+      //@audit-q why uncheked?, will wrap in the case of overflow
       uint256 newNonce = _nonce + 1;
 
       _writeNonce(_space, newNonce);

@@ -17,6 +17,7 @@ contract Implementation is SelfAuth {
   function updateImplementation(
     address _implementation
   ) external payable virtual onlySelf {
+    //@note no check towards the _implementation address, can be address 0 or EOA
     _updateImplementation(_implementation);
   }
 
@@ -36,8 +37,9 @@ contract Implementation is SelfAuth {
   function _setImplementation(
     address _imp
   ) internal {
+    //@note stores the implementation address at the slot value defined by the address of this contract
     assembly {
-      sstore(address(), _imp)
+      sstore(address(), _imp) 
     }
   }
 

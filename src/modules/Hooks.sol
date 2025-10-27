@@ -41,6 +41,8 @@ contract Hooks is SelfAuth, IERC1155Receiver, IERC777Receiver, IERC721Receiver, 
     if (_readHook(selector) != address(0)) {
       revert HookAlreadyExists(selector);
     }
+    //@audit-q @audit-lowrequire(implementation.code.length > 0, "implementation not a contract"); and validate non-zero address.
+    //@audit-low adding hook with address 0
     _writeHook(selector, implementation);
   }
 
@@ -63,6 +65,8 @@ contract Hooks is SelfAuth, IERC1155Receiver, IERC777Receiver, IERC721Receiver, 
   }
 
   function _writeHook(bytes4 selector, address implementation) private {
+    //@audit-low no check on the viability of implementation address
+    //@note _writeHook does not check that implementation is a contract. Storing an EOA or zero address may confuse callers.
     Storage.writeBytes32Map(HOOKS_KEY, bytes32(selector), bytes32(uint256(uint160(implementation))));
     emit DefinedHook(selector, implementation);
   }
@@ -105,10 +109,16 @@ contract Hooks is SelfAuth, IERC1155Receiver, IERC777Receiver, IERC721Receiver, 
 
   /// @notice Fallback function
   /// @dev Handles delegate calls to hooks
+  //@audit-q is it possible to store malicious target and using that target we can make any delegate call
+  //@note There's no authentication - anyone can trigger these delegatecalls to the mapped addresses.
+  //@note @audit-med
+  //Problem: Anyone can call the fallback with msg.data matching a selector, and trigger delegatecall to the stored hook address. There is no authentication on who may invoke a hook; onlySelf only protects adding/removing hooks (but not invoking them).
+  // Exploit scenario: Even if hooks are added by a trusted process, an attacker can repeatedly call hooks and trigger behavior that abuses gas, causes reentrancy, or manipulates external state from Hooks’ storage context.
   fallback() external payable {
     if (msg.data.length >= 4) {
       address target = _readHook(bytes4(msg.data));
       if (target != address(0)) {
+        //@audit-q Malicious contracts can consume all gas and cause DoS.
         (bool success, bytes memory result) = target.delegatecall(msg.data);
         assembly {
           if iszero(success) { revert(add(result, 32), mload(result)) }
@@ -122,3 +132,5 @@ contract Hooks is SelfAuth, IERC1155Receiver, IERC777Receiver, IERC721Receiver, 
   receive() external payable { }
 
 }
+
+//@audit-info You implement receiver functions (ERC1155, ERC721, ERC223, ERC777) but don’t declare ERC165 support. Some registries/clients check ERC165.

@@ -13,6 +13,7 @@ library P256 {
 
   /// @dev Unable to verify the P256 signature, due to missing
   /// RIP-7212 P256 verifier precompile and missing Solidity P256 verifier.
+  //@audit-info used error message
   error P256VerificationFailed();
 
   /*´:°•.°+.*•´.*:˚.°*.˚•´.°:°•.°•.*•´.*:˚.°*.˚•´.°:°•.°+.*•´.*:*/
@@ -60,6 +61,8 @@ library P256 {
       mstore(add(m, 0x80), y)
       mstore(0x00, 0) // Zeroize the return slot before the staticcalls.
       pop(staticcall(gas(), RIP_PRECOMPILE, m, 0xa0, 0x00, 0x20))
+      //@note stack return value: 1 (success) or 0 (failure) - tells us if the call executed, if the precompile call itself worked,
+      //@note Memory data: The actual verification result at memory position 0x00 - tells if signature is valid
       // RIP-7212 dictates that success returns `uint256(1)`.
       // But failure returns zero returndata, which is ambiguous.
       if iszero(returndatasize()) {
@@ -131,7 +134,7 @@ library P256 {
   ) internal pure returns (bytes32 x, bytes32 y) {
     /// @solidity memory-safe-assembly
     assembly {
-      let t := gt(mload(encoded), 0x3f)
+      let t := gt(mload(encoded), 0x3f)//length > 63, 0, 1
       x := mul(mload(add(encoded, 0x20)), t)
       y := mul(mload(add(encoded, 0x40)), t)
     }

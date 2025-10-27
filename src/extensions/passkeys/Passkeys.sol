@@ -57,7 +57,7 @@ contract Passkeys is ISapientCompact {
       // 00X0 0000 : 1 if fallback to abi decode data
       // 0X00 0000 : 1 if signature has metadata node
       // X000 0000 : unused
-
+      //@audit-low missing input validation on the signature length
       bytes1 flags = _signature[0];
       if ((flags & 0x20) == 0) {
         _requireUserVerification = (flags & 0x01) != 0;
@@ -104,6 +104,8 @@ contract Passkeys is ISapientCompact {
   }
 
   /// @inheritdoc ISapientCompact
+  //@note check if the same signatue can be used for different digest => signature replay attack
+  //@audit-q digest is not binded by nonce, timestamp, or context binding
   function recoverSapientSignatureCompact(bytes32 _digest, bytes calldata _signature) external view returns (bytes32) {
     (
       WebAuthn.WebAuthnAuth memory _webAuthnAuth,

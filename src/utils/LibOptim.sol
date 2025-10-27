@@ -17,7 +17,7 @@ library LibOptim {
     assembly {
       mstore(0, _a)
       mstore(32, _b)
-      c := keccak256(0, 64)
+      c := keccak256(0, 64) //@note keccak(mem[p…(p+n)))
     }
   }
 
@@ -25,6 +25,7 @@ library LibOptim {
    * @notice Returns the return data from the last call.
    * @return r The return data from the last call.
    */
+  //@audit-low make this safer by adding "mmeory-safe" assembly flag
   function returnData() internal pure returns (bytes memory r) {
     assembly {
       let size := returndatasize()

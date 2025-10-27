@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.27;
 
-import { Test } from "forge-std/Test.sol";
+import { Test, console2 } from "forge-std/Test.sol";
 
 import {
   ParameterOperation, ParameterRule, Permission, UsageLimit
@@ -121,6 +121,7 @@ contract PermissionValidatorTest is Test {
     (success,) = validator.validatePermission(permission, call, TEST_WALLET, TEST_SIGNER, newLimits);
     assertFalse(success, "Second call should fail as it would exceed limit");
   }
+  
 
   function test_validatePermission_GreaterThanOrEqual(uint256 threshold, uint256 testValue) public view {
     Permission memory permission = Permission({ target: TARGET, rules: new ParameterRule[](1) });

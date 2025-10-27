@@ -50,6 +50,8 @@ abstract contract Calls is ReentrancyGuard, BaseAuth, Nonce {
   /// @notice Execute a call
   /// @dev Callable only by the contract itself
   /// @param _payload The payload
+  //@note why this function is not pretected against reentrancy guard?
+  //@audit-q check if the same nonce can be used again to reenter?
   function selfExecute(
     bytes calldata _payload
   ) external payable virtual onlySelf {
@@ -59,6 +61,7 @@ abstract contract Calls is ReentrancyGuard, BaseAuth, Nonce {
     _execute(startingGas, opHash, decoded);
   }
 
+  //@audit-q check if possible to drain funds via reentrancy?
   function _execute(uint256 _startingGas, bytes32 _opHash, Payload.Decoded memory _decoded) private {
     bool errorFlag = false;
 
@@ -97,6 +100,9 @@ abstract contract Calls is ReentrancyGuard, BaseAuth, Nonce {
           )
         );
       } else {
+        //@note what happens when call is made to non-existent contract
+        //@note check if the same msg.value can be utilized by multiple calls 
+        //@note if gasLimit is 0 and this call is computation heavy then all the will get exhausted and hence causing gas attack
         (success) = LibOptim.call(call.to, call.value, gasLimit == 0 ? gasleft() : gasLimit, call.data);
       }
 

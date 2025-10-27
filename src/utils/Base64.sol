@@ -14,7 +14,7 @@ library Base64 {
   function encode(bytes memory data, bool fileSafe, bool noPadding) internal pure returns (string memory result) {
     /// @solidity memory-safe-assembly
     assembly {
-      let dataLength := mload(data)
+      let dataLength := mload(data) //Gets the length of the bytes array.
 
       if dataLength {
         // Multiply by 4/3 rounded up.

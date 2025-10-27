@@ -2,15 +2,12 @@
 pragma solidity ^0.8.27;
 
 import { Payload } from "../Payload.sol";
-
 import { Storage } from "../Storage.sol";
 import { IAuth } from "../interfaces/IAuth.sol";
 import { IERC1271, IERC1271_MAGIC_VALUE_HASH } from "../interfaces/IERC1271.sol";
-
 import { IPartialAuth } from "../interfaces/IPartialAuth.sol";
 import { ISapient } from "../interfaces/ISapient.sol";
 import { BaseSig } from "./BaseSig.sol";
-
 import { SelfAuth } from "./SelfAuth.sol";
 
 using Payload for Payload.Decoded;
@@ -35,7 +32,8 @@ abstract contract BaseAuth is IAuth, IPartialAuth, ISapient, IERC1271, SelfAuth 
 
   /// @notice Event emitted when a static signature is set
   event StaticSignatureSet(bytes32 _hash, address _address, uint96 _timestamp);
-
+  
+  //@note returning the address and the timestamp
   function _getStaticSignature(
     bytes32 _hash
   ) internal view returns (address, uint256) {
@@ -45,7 +43,7 @@ abstract contract BaseAuth is IAuth, IPartialAuth, ISapient, IERC1271, SelfAuth 
 
   function _setStaticSignature(bytes32 _hash, address _address, uint256 _timestamp) internal {
     Storage.writeBytes32Map(
-      STATIC_SIGNATURE_KEY, _hash, bytes32(uint256(uint160(_address)) << 96 | (_timestamp & 0xffffffffffffffffffffffff))
+      STATIC_SIGNATURE_KEY, _hash, bytes32(uint256(uint160(_address)) << 96 | (_timestamp & 0xffffffffffffffffffffffff)) //@note 0xffffffffffffffffffffffff => 12 bytes
     );
   }
 
@@ -64,6 +62,7 @@ abstract contract BaseAuth is IAuth, IPartialAuth, ISapient, IERC1271, SelfAuth 
   /// @param _address The address to associate with the static signature
   /// @param _timestamp The timestamp of the static signature
   /// @dev Only callable by the wallet itself
+  //@audit-q there are no validations on the values of hash, address and timestamp
   function setStaticSignature(bytes32 _hash, address _address, uint96 _timestamp) external onlySelf {
     _setStaticSignature(_hash, _address, _timestamp);
     emit StaticSignatureSet(_hash, _address, _timestamp);
@@ -84,15 +83,18 @@ abstract contract BaseAuth is IAuth, IPartialAuth, ISapient, IERC1271, SelfAuth 
   ) internal view virtual returns (bool isValid, bytes32 opHash) {
     // Read first bit to determine if static signature is used
     bytes1 signatureFlag = _signature[0];
-
+    
+    //@note static signature - signature has already been stored in the contract storage by the wallet itself
     if (signatureFlag & 0x80 == 0x80) {
       opHash = _payload.hash();
 
       (address addr, uint256 timestamp) = _getStaticSignature(opHash);
+      //@report-written off by one static signature expiration  check
       if (timestamp <= block.timestamp) {
         revert InvalidStaticSignatureExpired(opHash, timestamp);
-      }
-
+      } 
+      //@audit-low
+      //@note enabling the bypassing of address(0) and msg.sender
       if (addr != address(0) && addr != msg.sender) {
         revert InvalidStaticSignatureWrongCaller(opHash, msg.sender, addr);
       }
@@ -127,7 +129,7 @@ abstract contract BaseAuth is IAuth, IPartialAuth, ISapient, IERC1271, SelfAuth 
     for (uint256 i = 0; i < _payload.parentWallets.length; i++) {
       parentWallets[i] = _payload.parentWallets[i];
     }
-
+    //@audit-q storing the address of the caller in the list of parent wallets and then validating the signature
     parentWallets[_payload.parentWallets.length] = msg.sender;
     _payload.parentWallets = parentWallets;
 
@@ -140,6 +142,7 @@ abstract contract BaseAuth is IAuth, IPartialAuth, ISapient, IERC1271, SelfAuth 
   }
 
   /// @inheritdoc IERC1271
+  //@note hash => digest
   function isValidSignature(bytes32 _hash, bytes calldata _signature) external view returns (bytes4) {
     Payload.Decoded memory payload = Payload.fromDigest(_hash);
 

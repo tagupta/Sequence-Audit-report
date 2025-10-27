@@ -9,7 +9,7 @@ interface IERC223Receiver {
   /// @param from The address which previously owned the tokens
   /// @param value The amount of tokens being transferred
   /// @param data Transaction metadata
-  /// @return signature The signature of the function to be called
+  /// @return signature The signature of the function to be called //@note 0x8943ec02
   function tokenReceived(address from, uint256 value, bytes calldata data) external returns (bytes4 signature);
 
 }

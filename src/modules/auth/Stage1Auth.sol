@@ -14,6 +14,7 @@ contract Stage1Auth is BaseAuth, Implementation {
   /// @notice Error thrown when the image hash is zero
   error ImageHashIsZero();
   /// @notice Error thrown when the signature type is invalid
+  //@audit-info unused error
   error InvalidSignatureType(bytes1 _type);
 
   /// @notice Initialization code hash
@@ -45,6 +46,7 @@ contract Stage1Auth is BaseAuth, Implementation {
     if (_imageHash == bytes32(0)) {
       revert ImageHashIsZero();
     }
+    //@audit-q what if the saved value is same as _imageHash? A simple check can save storage operation gas cost
     Storage.writeBytes32(IMAGE_HASH_KEY, _imageHash);
     emit ImageHashUpdated(_imageHash);
 
@@ -55,6 +57,10 @@ contract Stage1Auth is BaseAuth, Implementation {
   function _isValidImage(
     bytes32 _imageHash
   ) internal view virtual override returns (bool) {
+    //@note bytes memory code = abi.encodePacked(Wallet.creationCode, uint256(uint160(_mainModule)));
+    //@note _mainModule => address of this contract
+
+    //@note keccak256(0xFF ++ sender ++ salt ++ keccak256(initCode))
     return address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", FACTORY, _imageHash, INIT_CODE_HASH)))))
       == address(this);
   }

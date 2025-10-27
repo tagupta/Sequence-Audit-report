@@ -19,12 +19,13 @@ abstract contract ImplicitSessionManager {
   /// @param wallet The wallet's address
   /// @param sessionSigner The session signer's address
   /// @param attestation The session attestation
+  //@audit-low missing blacklist data must result in validation error based on this documented part: Calls to a blacklisted address will be rejected, and missing blacklist data will cause validation errors.
   function _validateImplicitCall(
     Payload.Call calldata call,
     address wallet,
     address sessionSigner,
     Attestation memory attestation,
-    address[] memory blacklist
+    address[] memory blacklist //@note ensure that the passed list is sorted - how?
   ) internal view {
     // Validate the session signer is attested
     if (sessionSigner != attestation.approvedSigner) {

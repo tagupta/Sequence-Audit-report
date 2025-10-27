@@ -15,6 +15,13 @@ contract Factory {
   /// @param _mainModule Address of the main module to be used by the wallet
   /// @param _salt Salt used to generate the wallet, which is the imageHash of the wallet's configuration.
   /// @dev It is recommended to not have more than 200 signers as opcode repricing could make transactions impossible to execute as all the signers must be passed for each transaction.
+  //@note EVM loads the packaged creation code
+  //Runs the Huff constructor
+  //Constructor reads first 32 bytes (which contain _mainModule)
+  //Stores _mainModule as implementation address
+  //Returns the runtime code
+  //Contract is now deployed with implementation set
+  
   function deploy(address _mainModule, bytes32 _salt) public payable returns (address _contract) {
     bytes memory code = abi.encodePacked(Wallet.creationCode, uint256(uint160(_mainModule)));
     assembly {

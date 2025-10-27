@@ -22,6 +22,7 @@ abstract contract ExplicitSessionManager is IExplicitSessionManager, PermissionV
   ) external {
     address wallet = msg.sender;
     for (uint256 i = 0; i < limits.length; i++) {
+      //@audit-med what if someone tries to set the limit with bytes32(0) usage hash? Who is defining the permissions?
       if (limits[i].usageAmount < getLimitUsage(wallet, limits[i].usageHash)) {
         // Cannot decrement usage limit
         revert SessionErrors.InvalidLimitUsageIncrement();
@@ -51,6 +52,7 @@ abstract contract ExplicitSessionManager is IExplicitSessionManager, PermissionV
     // Find the permissions for the given session signer
     SessionPermissions memory sessionPermissions;
     for (uint256 i = 0; i < allSessionPermissions.length; i++) {
+      //@audit-q can there be duplicate entries in session permissions
       if (allSessionPermissions[i].signer == sessionSigner) {
         sessionPermissions = allSessionPermissions[i];
         break;
@@ -120,6 +122,7 @@ abstract contract ExplicitSessionManager is IExplicitSessionManager, PermissionV
   /// @param sessionUsageLimits The session usage limits
   /// @dev Reverts if the required increment call is missing or invalid
   /// @dev If no usage limits are used, this function does nothing
+  //@note incrementUsageLimit is the first call in the payload
   function _validateLimitUsageIncrement(
     Payload.Call calldata call,
     SessionUsageLimits[] memory sessionUsageLimits
@@ -141,6 +144,7 @@ abstract contract ExplicitSessionManager is IExplicitSessionManager, PermissionV
       }
       UsageLimit[] memory limits = new UsageLimit[](totalLimitsLength);
       uint256 limitIndex = 0;
+      //@audit-low DOS attack with O(n^2) computational cost
       for (uint256 i = 0; i < sessionUsageLimits.length; i++) {
         for (uint256 j = 0; j < sessionUsageLimits[i].limits.length; j++) {
           limits[limitIndex++] = sessionUsageLimits[i].limits[j];

@@ -25,6 +25,7 @@ contract Guest {
     _dispatchGuest(decoded, opHash);
   }
 
+  //@audit-med gas grifing attack
   function _dispatchGuest(Payload.Decoded memory _decoded, bytes32 _opHash) internal {
     bool errorFlag = false;
 
@@ -41,8 +42,9 @@ contract Guest {
       // Reset the error flag
       // onlyFallback calls only apply when the immediately preceding transaction fails
       errorFlag = false;
-
+      //@note Maximum amount of gas you're willing to spend on this transaction
       uint256 gasLimit = call.gasLimit;
+      //@audit-q bypassing calls with zero gas limit
       if (gasLimit != 0 && gasleft() < gasLimit) {
         revert Calls.NotEnoughGas(_decoded, i, gasleft());
       }

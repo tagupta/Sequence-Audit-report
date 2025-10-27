@@ -23,7 +23,7 @@ library SessionSig {
   uint256 internal constant FLAG_BLACKLIST = 3;
   uint256 internal constant FLAG_IDENTITY_SIGNER = 4;
 
-  uint256 internal constant MIN_ENCODED_PERMISSION_SIZE = 94;
+  uint256 internal constant MIN_ENCODED_PERMISSION_SIZE = 94; //@note how this value is decided?
 
   /// @notice Call signature for a specific session
   /// @param isImplicit If the call is implicit
@@ -84,6 +84,7 @@ library SessionSig {
       (dataSize, pointer) = encodedSignature.readUint24(pointer);
 
       // Recover the session configuration
+      //@note pointer + dataSize ≤ encodedSignature.length - not validating this, end up reading garbage data
       (sig, hasBlacklistInConfig) = recoverConfiguration(encodedSignature[pointer:pointer + dataSize]);
       pointer += dataSize;
 
@@ -114,6 +115,7 @@ library SessionSig {
           // Recover the identity signer from the attestation identity signature
           bytes32 attestationHash = att.toHash();
           address recoveredIdentitySigner = ecrecover(attestationHash, v, r, s);
+          //@audit-low check missing - recoveredIdentitySigner != address(0)
           if (recoveredIdentitySigner != sig.identitySigner) {
             revert SessionErrors.InvalidIdentitySigner();
           }
@@ -155,6 +157,7 @@ library SessionSig {
             callSignature.attestation = attestationList[attestationIndex];
           } else {
             // Session permission index is the entire byte, top bit is 0 => no conflict
+            //@audit-low this is not even validating whether the index value is viable within the session permission array
             callSignature.sessionPermission = flag;
           }
         }
@@ -167,12 +170,13 @@ library SessionSig {
           (r, s, v, pointer) = encodedSignature.readRSVCompact(pointer);
 
           bytes32 callHash = hashCallWithReplayProtection(payload, i);
+          //@note Using standard ecrecover without checking for signature malleability
+          //@audit-low
           callSignature.sessionSigner = ecrecover(callHash, v, r, s);
           if (callSignature.sessionSigner == address(0)) {
             revert SessionErrors.InvalidSessionSigner(address(0));
           }
         }
-
         sig.callSignatures[i] = callSignature;
       }
     }
@@ -193,7 +197,7 @@ library SessionSig {
   ///     - if flag == FLAG_IDENTITY_SIGNER: [address identity_signer]
   /// @dev A valid configuration must have exactly one identity signer and at most one blacklist.
   function recoverConfiguration(
-    bytes calldata encoded
+    bytes calldata encoded //@note encoded session signature
   ) internal pure returns (DecodedSignature memory sig, bool hasBlacklist) {
     uint256 pointer;
     uint256 permissionsCount;
@@ -233,7 +237,7 @@ library SessionSig {
 
         // Update root
         {
-          bytes32 permissionHash = _leafHashForPermissions(encoded[pointerStart:pointer]);
+          bytes32 permissionHash = _leafHashForPermissions(encoded[pointerStart:pointer]);//@note starting from signer uptil the last parameter rule 
           sig.imageHash =
             sig.imageHash != bytes32(0) ? LibOptim.fkeccak256(sig.imageHash, permissionHash) : permissionHash;
         }
@@ -265,6 +269,7 @@ library SessionSig {
         }
         // Process branch
         uint256 nrindex = pointer + size;
+        //@note no depth limit over the recursive calls
         (DecodedSignature memory branchSig, bool branchHasBlacklist) = recoverConfiguration(encoded[pointer:nrindex]);
         pointer = nrindex;
 
@@ -354,6 +359,7 @@ library SessionSig {
 
     {
       // Update the permissions array length to the actual count
+      // @note creating a new pointer to the same memory location
       SessionPermissions[] memory permissions = sig.sessionPermissions;
       assembly {
         mstore(permissions, permissionsCount)
