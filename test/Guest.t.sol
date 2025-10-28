@@ -7,6 +7,7 @@ import { Calls } from "../src/modules/Calls.sol";
 import { Payload } from "../src/modules/Payload.sol";
 import { PrimitivesRPC } from "./utils/PrimitivesRPC.sol";
 import { AdvTest } from "./utils/TestUtils.sol";
+import { console2 } from "forge-std/console2.sol";
 
 struct GuestPayload {
   bool noChainId;
@@ -64,6 +65,58 @@ contract GuestTest is AdvTest {
         // emit CallSucceeded(opHash, i);
       }
     }
+    (bool ok,) = address(guest).call(packed);
+    assertTrue(ok);
+  }
+
+
+  //@audit-poc
+  function test_fallback_Success_With_Invalid_Behavior_On_Error_set_as_3() external {
+    uint8 globalFlag = 0x11; // 00010001 binary
+    address randomAddress = makeAddr("random address");
+    address[] memory parentWallets = new address[](0);
+    Payload.Call[] memory calls = new Payload.Call[](1);
+    calls[0] = Payload.Call({
+      to: randomAddress,
+      value: uint256(100000000000000000),
+      data: bytes(""),
+      gasLimit: uint256(0),
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: uint256(3)
+    });
+    Payload.Decoded memory decodedNew = Payload.Decoded({
+      kind: Payload.KIND_TRANSACTIONS,
+      noChainId: false,
+      // Transaction kind
+      calls: calls,
+      space: uint256(0),
+      nonce: uint256(0),
+      // Message kind
+      message: bytes(""),
+      // Config update kind
+      imageHash: bytes32(0),
+      // Digest kind for 1271
+      digest: bytes32(0),
+      // Parent wallets
+      parentWallets: parentWallets
+    });
+    // Call flags = 0xC0 to 0xC3 for behaviorOnError = 3
+    // We want self call to avoid providing address, so bit 0 = 1
+    // behaviorOnError = 3 → bits 6-7 = 11
+    // So: 11000001 = 0xC1
+    uint8 callFlags = 0xC2; // Self call + behaviorOnError = 3
+    bytes memory packed = abi.encodePacked(
+      uint8(globalFlag), // 0x11
+      uint8(callFlags), // 0xC2
+      randomAddress,
+      uint256(100000000000000000)
+    );
+    
+    bytes32 opHash = Payload.hashFor(decodedNew, address(guest));
+    vm.expectEmit(true, true, true, true);
+    emit CallSucceeded(opHash, 0);
+    vm.prank(address(guest));
     (bool ok,) = address(guest).call(packed);
     assertTrue(ok);
   }

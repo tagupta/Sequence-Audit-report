@@ -2,6 +2,7 @@
 pragma solidity ^0.8.27;
 
 import { LibBytes } from "../utils/LibBytes.sol";
+import {console2} from 'forge-std/console2.sol';
 
 using LibBytes for bytes;
 
@@ -143,7 +144,7 @@ library Payload {
     if (globalFlag & 0x01 == 0x01) {
       _decoded.space = 0;
     } else {
-      (_decoded.space, pointer) = packed.readUint160(pointer);//read 20 bytes
+      (_decoded.space, pointer) = packed.readUint160(pointer); //read 20 bytes
     }
 
     // Next 3 bits determine the size of the nonce
@@ -214,7 +215,7 @@ library Payload {
       _decoded.calls[i].onlyFallback = (flags & 0x20 == 0x20);
 
       // Last 2 bits are directly mapped to the behavior on error
-      //@audit-q since only 3 error cases are defined, need to check what would happen if error code => 0x04 happens to occur
+      //@report-written since only 3 error cases are defined, need to check what would happen if error code == 0x03 happens to occur
       _decoded.calls[i].behaviorOnError = (flags & 0xC0) >> 6;
     }
   }
@@ -241,7 +242,7 @@ library Payload {
     }
     return keccak256(abi.encodePacked(callHashes));
   }
-   
+
   //@audit-q is there a way to deal with duplicate wallet addresses
   function toEIP712(
     Decoded memory _decoded
@@ -271,6 +272,7 @@ library Payload {
   function hash(
     Decoded memory _decoded
   ) internal view returns (bytes32) {
+    console2.log("address, this from payload", address(this));
     bytes32 domain = domainSeparator(_decoded.noChainId, address(this));
     bytes32 structHash = toEIP712(_decoded);
     return keccak256(abi.encodePacked("\x19\x01", domain, structHash));

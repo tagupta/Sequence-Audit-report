@@ -47,6 +47,8 @@ contract Passkeys is ISapientCompact {
       bytes32 _metadata
     )
   {
+    //@note x and y are public key coordinates,
+    //@note r and s are signature components
     unchecked {
       // Global flag encoding:
       // 0000 000X : requireUserVerification
@@ -57,7 +59,7 @@ contract Passkeys is ISapientCompact {
       // 00X0 0000 : 1 if fallback to abi decode data
       // 0X00 0000 : 1 if signature has metadata node
       // X000 0000 : unused
-      //@audit-low missing input validation on the signature length
+      //@report-ignored missing input validation on the signature length
       bytes1 flags = _signature[0];
       if ((flags & 0x20) == 0) {
         _requireUserVerification = (flags & 0x01) != 0;
@@ -104,8 +106,7 @@ contract Passkeys is ISapientCompact {
   }
 
   /// @inheritdoc ISapientCompact
-  //@note check if the same signatue can be used for different digest => signature replay attack
-  //@audit-q digest is not binded by nonce, timestamp, or context binding
+  //@report-written _rootForPasskey causing the root to buypass the verfication based on signer leading to cross-implementation equivalence
   function recoverSapientSignatureCompact(bytes32 _digest, bytes calldata _signature) external view returns (bytes32) {
     (
       WebAuthn.WebAuthnAuth memory _webAuthnAuth,
@@ -118,7 +119,7 @@ contract Passkeys is ISapientCompact {
     if (!WebAuthn.verify(abi.encodePacked(_digest), _requireUserVerification, _webAuthnAuth, _x, _y)) {
       revert InvalidPasskeySignature(_webAuthnAuth, _requireUserVerification, _x, _y);
     }
-
+    //@note the root generated is not bounded by signer
     return _rootForPasskey(_requireUserVerification, _x, _y, _metadata);
   }
 

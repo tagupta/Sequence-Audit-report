@@ -134,7 +134,7 @@ library P256 {
   ) internal pure returns (bytes32 x, bytes32 y) {
     /// @solidity memory-safe-assembly
     assembly {
-      let t := gt(mload(encoded), 0x3f)//length > 63, 0, 1
+      let t := gt(mload(encoded), 0x3f) //length > 63, 0, 1
       x := mul(mload(add(encoded, 0x20)), t)
       y := mul(mload(add(encoded, 0x40)), t)
     }

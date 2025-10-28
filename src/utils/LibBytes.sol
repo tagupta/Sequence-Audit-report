@@ -20,9 +20,9 @@ library LibBytes {
 
   function readUint8(bytes calldata _data, uint256 _index) internal pure returns (uint8 a, uint256 newPointer) {
     assembly {
-      let word := calldataload(add(_index, _data.offset))//@note loads 32 bytesfrom this position => index + _data.offset
+      let word := calldataload(add(_index, _data.offset)) //@note loads 32 bytesfrom this position => index + _data.offset
       //@note 0x12345678...0000 → 0x00000000...0012
-      a := shr(248, word)//@note shift right => This moves the first byte to the last position
+      a := shr(248, word) //@note shift right => This moves the first byte to the last position
       newPointer := add(_index, 1)
     }
   }
@@ -66,7 +66,7 @@ library LibBytes {
     }
   }
 
-//@report-written memory-corruption-in-getbytes32frombytes-can-likely-lead-to-loss-of-funds-code4rena-basin-basin-git
+  //@report-written memory-corruption-in-getbytes32frombytes-can-likely-lead-to-loss-of-funds-code4rena-basin-basin-git
   function readUintX(
     bytes calldata _data,
     //@note Starting position (in bytes) within _data

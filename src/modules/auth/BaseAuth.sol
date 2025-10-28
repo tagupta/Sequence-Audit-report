@@ -32,7 +32,7 @@ abstract contract BaseAuth is IAuth, IPartialAuth, ISapient, IERC1271, SelfAuth 
 
   /// @notice Event emitted when a static signature is set
   event StaticSignatureSet(bytes32 _hash, address _address, uint96 _timestamp);
-  
+
   //@note returning the address and the timestamp
   function _getStaticSignature(
     bytes32 _hash
@@ -43,7 +43,9 @@ abstract contract BaseAuth is IAuth, IPartialAuth, ISapient, IERC1271, SelfAuth 
 
   function _setStaticSignature(bytes32 _hash, address _address, uint256 _timestamp) internal {
     Storage.writeBytes32Map(
-      STATIC_SIGNATURE_KEY, _hash, bytes32(uint256(uint160(_address)) << 96 | (_timestamp & 0xffffffffffffffffffffffff)) //@note 0xffffffffffffffffffffffff => 12 bytes
+      STATIC_SIGNATURE_KEY,
+      _hash,
+      bytes32(uint256(uint160(_address)) << 96 | (_timestamp & 0xffffffffffffffffffffffff)) //@note 0xffffffffffffffffffffffff => 12 bytes
     );
   }
 
@@ -83,7 +85,7 @@ abstract contract BaseAuth is IAuth, IPartialAuth, ISapient, IERC1271, SelfAuth 
   ) internal view virtual returns (bool isValid, bytes32 opHash) {
     // Read first bit to determine if static signature is used
     bytes1 signatureFlag = _signature[0];
-    
+
     //@note static signature - signature has already been stored in the contract storage by the wallet itself
     if (signatureFlag & 0x80 == 0x80) {
       opHash = _payload.hash();
@@ -92,7 +94,7 @@ abstract contract BaseAuth is IAuth, IPartialAuth, ISapient, IERC1271, SelfAuth 
       //@report-written off by one static signature expiration  check
       if (timestamp <= block.timestamp) {
         revert InvalidStaticSignatureExpired(opHash, timestamp);
-      } 
+      }
       //@audit-low
       //@note enabling the bypassing of address(0) and msg.sender
       if (addr != address(0) && addr != msg.sender) {

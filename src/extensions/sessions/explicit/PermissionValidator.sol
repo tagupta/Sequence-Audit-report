@@ -100,7 +100,8 @@ abstract contract PermissionValidator {
             break;
           }
         }
-        if (previousUsage == 0) { //if (!foundInCurrentPayload) {
+        if (previousUsage == 0) {
+          //if (!foundInCurrentPayload) {
           // Not in current payload, use storage
           //@note This assumes previousUsage == 0 means "not found in current payload", but:
           //@audit-low
@@ -148,7 +149,6 @@ abstract contract PermissionValidator {
     //   }
     //   sig.sessionPermissions = actualPermissions;
     //   */
-
 
     assembly {
       mstore(newUsageLimits, actualLimitsCount)

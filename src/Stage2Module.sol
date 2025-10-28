@@ -14,7 +14,7 @@ import { IAuth } from "./modules/interfaces/IAuth.sol";
 contract Stage2Module is Calls, Stage2Auth, Hooks, ERC4337v07 {
 
   constructor(
-    address _entryPoint //@audit-low no validation against address 0
+    address _entryPoint //@report-written no validation against address 0
   ) ERC4337v07(_entryPoint) { }
 
   /// @inheritdoc IAuth

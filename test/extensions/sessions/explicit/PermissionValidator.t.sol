@@ -121,7 +121,6 @@ contract PermissionValidatorTest is Test {
     (success,) = validator.validatePermission(permission, call, TEST_WALLET, TEST_SIGNER, newLimits);
     assertFalse(success, "Second call should fail as it would exceed limit");
   }
-  
 
   function test_validatePermission_GreaterThanOrEqual(uint256 threshold, uint256 testValue) public view {
     Permission memory permission = Permission({ target: TARGET, rules: new ParameterRule[](1) });

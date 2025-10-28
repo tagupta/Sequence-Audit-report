@@ -101,7 +101,7 @@ abstract contract Calls is ReentrancyGuard, BaseAuth, Nonce {
         );
       } else {
         //@note what happens when call is made to non-existent contract
-        //@note check if the same msg.value can be utilized by multiple calls 
+        //@note check if the same msg.value can be utilized by multiple calls
         //@note if gasLimit is 0 and this call is computation heavy then all the will get exhausted and hence causing gas attack
         (success) = LibOptim.call(call.to, call.value, gasLimit == 0 ? gasleft() : gasLimit, call.data);
       }

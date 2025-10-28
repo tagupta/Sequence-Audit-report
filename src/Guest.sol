@@ -6,6 +6,7 @@ import { Payload } from "./modules/Payload.sol";
 
 import { LibBytes } from "./utils/LibBytes.sol";
 import { LibOptim } from "./utils/LibOptim.sol";
+import { console2 } from "forge-std/console2.sol";
 
 /// @title Guest
 /// @author Agustin Aguilar, William Hua, Michael Standen
@@ -21,6 +22,7 @@ contract Guest {
   /// @dev Dispatches the guest call
   fallback() external payable {
     Payload.Decoded memory decoded = Payload.fromPackedCalls(msg.data);
+    console2.log(decoded.noChainId);
     bytes32 opHash = Payload.hash(decoded);
     _dispatchGuest(decoded, opHash);
   }
@@ -53,7 +55,11 @@ contract Guest {
         revert DelegateCallNotAllowed(i);
       }
 
+      //@note behaviorOnError can have 4 valid values and the if conditions are handling only 3 errors, causing the unexpected value (0x03) to emit the CallSuccessed event and creating inconsistency for off-chain systems
+      console2.log("to, value", call.to, call.value);
+      
       bool success = LibOptim.call(call.to, call.value, gasLimit == 0 ? gasleft() : gasLimit, call.data);
+  
       if (!success) {
         if (call.behaviorOnError == Payload.BEHAVIOR_IGNORE_ERROR) {
           errorFlag = true;
@@ -70,7 +76,7 @@ contract Guest {
           break;
         }
       }
-
+   
       emit Calls.CallSucceeded(_opHash, i);
     }
   }

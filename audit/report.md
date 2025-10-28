@@ -300,3 +300,371 @@ messageHash := mload(e)
 **Impact** An attacker could exploit signature malleability to create different valid signatures for the same message, potentially leading to unauthorized actions or fund transfers.
 
 **Recommended mitigation** Consider using OpenZeppelin's ECDSA library instead of the built-in function.
+
+### [L-6] Missing validation for zero address in constructor parameter of `ERC4337v07` contract
+
+**Description** The constructor accepts an `_entryPoint` address parameter but does not validate whether it is the zero address. Passing an invalid (zero) address would lead to an unusable contract instance.
+
+
+**Impact** If the contract is deployed with a zero `_entryPoint`, all subsequent interactions depending on it may fail or behave unexpectedly, potentially bricking the contract instance or blocking its integration with the **ERC-4337** infrastructure.
+
+**Recommended mitigation**
+Add a validation check in the constructor of `ERC4337v07` contract to ensure that `_entryPoint` is not the zero address:
+
+```diff
+constructor(address _entryPoint){
++    require(_entryPoint != address(0), "Invalid entry point");
+     entryPoint = _entryPoint;
+}
+```
+
+### [L-7] Lack of domain separation in passkey root calculation in `_rootForPasskey` allows for cross-implementation image hash equivalence
+
+**Description** : The `_rootForPasskey` function computes a configuration root using only the **public key coordinates (x,y), verification flag, and metadata** without including any domain separation parameters. As a result, any other signer implementation that happens to combine the same four inputs with the same hash structure can return the same root for the same inputs.
+
+**Impact** 
+1. *Cross-Implementation Confusion:* Systems that approve roots without validating the signer contract address can be tricked into accepting unverified signatures.
+   
+2. *Versioning Attacks:* Future upgrades cannot cleanly migrate as old and new implementations would produce conflicting roots
+   
+3. *Off-Chain System Compromise:* Monitoring tools, indexers, and whitelists that track roots without signer context can be bypassed
+
+**Proof of Concepts**
+1. Deploy two different signer contracts (e.g., `PasskeysLike1` and `OtherSigner`) that both implement the same root calculation logic in `_rootForPasskey`.
+2. Deploy another contract (e.g., `WalletAuthenticator`) that uses these signers to authenticate signatures based on the computed root.
+3. Call the `authenticate` function of `WalletAuthenticator` with a signature generated for `PasskeysLike1` and observe that it is also accepted when using `OtherSigner`, demonstrating that the same root is produced by both implementations.
+
+Create a new test file [`RootForPasskey.t.sol`](test/RootForPasskey.t.sol) in the test folder with the following content:
+<details>
+<summary>Proof of Code</summary>
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.27;
+
+import { Test } from "forge-std/Test.sol";
+
+/// Minimal interface compatible with Sequence-style sapient signer
+interface ISapientCompact {
+
+  function recoverSapientSignatureCompact(bytes32 digest, bytes calldata signature) external view returns (bytes32);
+
+}
+
+library HashUtil {
+
+  function fkeccak(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+    return keccak256(abi.encodePacked(a, b));
+  }
+
+  // This mirrors Passkeys._rootForPasskey structure (no domain separation!)
+  function passkeysLikeRoot(
+    bool requireUserVerification,
+    bytes32 x,
+    bytes32 y,
+    bytes32 metadata
+  ) internal pure returns (bytes32) {
+    bytes32 a = fkeccak(x, y);
+    bytes32 ruv = bytes32(uint256(requireUserVerification ? 1 : 0));
+    bytes32 b = fkeccak(ruv, metadata);
+    return fkeccak(a, b);
+  }
+
+}
+
+contract PasskeysLike1 is ISapientCompact {
+
+  function recoverSapientSignatureCompact(bytes32, /*digest*/ bytes calldata signature) external pure returns (bytes32) {
+    (bool ruv, bytes32 x, bytes32 y, bytes32 metadata) = abi.decode(signature, (bool, bytes32, bytes32, bytes32));
+    return HashUtil.passkeysLikeRoot(ruv, x, y, metadata);
+  }
+
+}
+
+contract OtherSiger is ISapientCompact {
+
+  function recoverSapientSignatureCompact(bytes32, /*digest*/ bytes calldata signature) external pure returns (bytes32) {
+    (bool ruv, bytes32 x, bytes32 y, bytes32 metadata) = abi.decode(signature, (bool, bytes32, bytes32, bytes32));
+    return HashUtil.passkeysLikeRoot(ruv, x, y, metadata);
+  }
+
+}
+
+contract WalletRootAuthenticator {
+
+  bytes32 public imageHash;
+
+  //@note storing image hash without including domain separation information
+  function setImageHash(
+    bytes32 h
+  ) external {
+    imageHash = h;
+  }
+
+  function authenticate(address signer, bytes32 digest, bytes calldata signature) external view returns (bool) {
+    bytes32 root = ISapientCompact(signer).recoverSapientSignatureCompact(digest, signature);
+    return root == imageHash; // BUG: does not bind signer address/type!
+  }
+
+}
+
+contract TestPoc is Test {
+
+  WalletRootAuthenticator walletAuthenticator;
+  PasskeysLike1 passkeysLike1;
+  OtherSiger otherSiger;
+
+  function setUp() external {
+    walletAuthenticator = new WalletRootAuthenticator();
+    passkeysLike1 = new PasskeysLike1();
+    otherSiger = new OtherSiger();
+  }
+
+  function test_authentication_passes_from_malicious_signer() external {
+    bytes32 x = keccak256("pubkeyX");
+    bytes32 y = keccak256("pubkeyY");
+    bytes32 metadata = keccak256("metadata");
+    bool ruv = true;
+    bytes32 expectedImageHash = HashUtil.passkeysLikeRoot(ruv, x, y, metadata);
+
+    walletAuthenticator.setImageHash(expectedImageHash);
+    bytes memory signature = abi.encode(ruv,x,y,metadata);
+
+    bool fromPassKeySigner = walletAuthenticator.authenticate(address(passkeysLike1), bytes32(0), signature);
+    bool fromOtherSigner = walletAuthenticator.authenticate(address(otherSiger), bytes32(0), signature);
+    
+    assertEq(fromPassKeySigner, true);
+    assertEq(fromOtherSigner, true);
+  }
+
+}
+
+```
+</details>
+
+**Recommended mitigation** Mix a constant type/version tag and/or the signer contract address into the root derivation so that a different implementation can never produce the same root for identical (x, y, ruv, metadata).
+
+```solidity
+// Example: strong domain separation
+bytes32 constant PASSKEYS_V1_DOMAIN = keccak256("SEQUENCE_SAPIENT_PASSKEYS_V1");
+
+function _rootForPasskey(
+    bool _requireUserVerification,
+    bytes32 _x,
+    bytes32 _y,
+    bytes32 _metadata
+) internal pure returns (bytes32) {
+    bytes32 leaf = keccak256(abi.encodePacked("leaf", _x, _y));
+    bytes32 ruv  = bytes32(uint256(_requireUserVerification ? 1 : 0));
+    bytes32 aux  = keccak256(abi.encodePacked("aux", ruv, _metadata));
+
+    // Include domain tag AND the signer contract address (hardest to spoof)
+    return keccak256(
+        abi.encodePacked(PASSKEYS_V1_DOMAIN, address(this), leaf, aux)
+    );
+}
+```
+
+### [L-8] Zero-address signer accepted in recovery queue via `queuePayload` of `Recovery.sol` allows unauthorized queue entries with signers as `address(0)`
+
+**Description** The recovery queue authorization mechanism incorrectly accepts ECDSA signature verification failures as valid signatures when the provided signer is `address(0)`. This allows any caller to queue recovery payloads via `queuePayload` for any wallet without possessing valid signatures, potentially enabling storage bloat attacks and unauthorized queue entries.
+
+The `isValidSignature()` function in the `Recovery.sol` contract contains a logic flaw when handling ECDSA signature verification for the zero address. When `ecrecover()` is called with an invalid signature, it returns `address(0)` to indicate failure. However, if the caller provides _signer as `address(0)`, the function incorrectly treats this as a successful match and returns true.
+
+The vulnerability occurs specifically in the ECDSA signature verification path when the signature length is 64 bytes. The code extracts the signature components and calls `ecrecover()`, but fails to distinguish between a legitimate `zero-address signer` and an `ecrecover()` failure.
+
+Code Example from `Recovery.sol`
+
+```solidity
+function isValidSignature(
+    address _wallet,
+    address _signer,
+    Payload.Decoded calldata _payload,
+    bytes calldata _signature
+  ) internal view returns (bool) {
+    bytes32 rPayloadHash = recoveryPayloadHash(_wallet, _payload);
+
+    if (_signature.length == 64) {
+      // Try an ECDSA signature
+      [...]
+
+      address addr = ecrecover(rPayloadHash, v, r, s);
+
+@>    if (addr == _signer) {
+        return true;
+      }
+    }
+    [...]
+  }
+}
+```
+
+**Impact** 
+1. The primary impact is the ability to create unauthorized queue entries for any wallet under the zero-address signer. 
+2. This enables storage bloat attacks where an attacker can spam arbitrary payload hashes into the queuedPayloadHashes mapping, increasing on-chain storage costs and potentially disrupting operational flows that enumerate queued entries. 
+
+**Proof of Concepts**
+1. Calling `queuePayload()` with _signer set to `address(0)`
+2. Providing any 64-byte garbage data as the signature
+3. The `ecrecover()` call fails and returns `address(0)`
+4. The comparison `addr == _signer` evaluates to true (both are zero)
+5. The function incorrectly authorizes the operation and writes to `timestampForQueuedPayload` and `queuedPayloadHashes`
+
+Find the proof of code in the test file [`Recovery.t.sol`](test/extensions/recovery/Recovery.t.sol):
+<details>
+<summary>Proof of Code</summary>
+
+```solidity
+  function test_queue_payload_with_address_zero_signer(
+    address _wallet,
+    Payload.Decoded memory _payload,
+    uint64 _randomTime
+    ) external {
+
+    boundToLegalPayload(_payload);
+
+    vm.warp(_randomTime);
+    
+    bytes32 r = bytes32(uint256(0));  // Invalid r
+    bytes32 s = bytes32(uint256(0));  // Invalid s  
+    uint8 v = 27;
+    bytes32 yParityAndS = bytes32((uint256(v - 27) << 255) | uint256(s));
+    bytes memory signature = abi.encodePacked(r, yParityAndS);
+    bytes32 payloadHash = Payload.hashFor(_payload, _wallet);
+
+    vm.expectEmit(true, true, true, true, address(recovery));
+    emit Recovery.NewQueuedPayload(_wallet, address(0), payloadHash, block.timestamp);
+
+    recovery.queuePayload(_wallet, address(0),_payload, signature);
+  }
+```
+</details>
+
+**Recommended mitigation** Consider implementing explicit validation to reject the zero address as a valid signer in the ECDSA verification path. One approach would be to add a check that ensures `_signer != address(0)` before proceeding with ECDSA verification, or alternatively, verify that `ecrecover()` returns a non-zero address before comparing it with the provided signer.
+
+```diff
+function isValidSignature(
+  address _wallet,
+  address _signer,
+  Payload.Decoded calldata _payload,
+  bytes calldata _signature
+) internal view returns (bool) {
+  bytes32 rPayloadHash = recoveryPayloadHash(_wallet, _payload);
+
+  if (_signature.length == 64) {
+    // Try an ECDSA signature
+    bytes32 r;
+    bytes32 s;
+    uint8 v;
+    (r, s, v,) = _signature.readRSVCompact(0);
+
+    address addr = ecrecover(rPayloadHash, v, r, s);
+-   if (addr == _signer) {
++   if (addr != address(0) && addr == _signer) {
+      return true;
+    }
+  }
+```
+
+### [L-9] Unbounded growth of recovery queue via `queuePayload` allows storage bloat
+
+**Description** The Recovery contract maintains a `queuedPayloadHashes` mapping that stores arrays of payload hashes for each wallet-signer combination. When `queuePayload()` is called, it performs signature validation and then unconditionally appends the new payload hash to the corresponding array without any bounds checking or cleanup logic.
+
+The function only verifies that the provided signature matches the specified signer before adding entries to the queue. No mechanism exists within the contract to remove processed payloads, expire old entries, or limit the total number of queued items per wallet-signer pair. Since any account can call `queuePayload()` with valid signatures from signers they control, the storage arrays can be expanded arbitrarily.
+
+While the contract's core functionality relies on `timestampForQueuedPayload` lookups rather than array iteration, the unbounded growth creates persistent on-chain storage bloat that accumulates over time.
+
+**Impact** 
+1. The primary impact is on-chain storage bloat as the queuedPayloadHashes arrays grow without bounds. This may contribute to increased node synchronization and archival costs across the network. 
+
+2. The current contract implementation does not iterate over these arrays, so there is no immediate execution denial-of-service risk or threat to protocol funds.
+
+**Recommended mitigation**
+1. Consider implementing a cleanup mechanism to prevent unbounded storage growth. One approach could be to add a maximum queue size per wallet-signer combination, automatically removing the oldest entries when the limit is reached. 
+
+2. Alternatively, consider implementing a time-based expiration system that removes payload hashes after a reasonable period, or add administrative functions to prune processed or stale entries. The specific approach should balance storage efficiency with the protocol's operational requirements for payload queuing and processing.
+
+### [L-10] `_dispatchGuest` of `Guest.sol` fails silently via behaviorOnError = 3 leading to wrong emission of `Guest.CallSucceeded` event
+
+**Description** The `_dispatchGuest` function in `Guest.sol` mishandles sub-calls with `behaviorOnError = 3`. The `Payload.fromPackedCalls` function in `Payload.sol` extracts `behaviorOnError` as `(flags >> 6) & 0x03`, allowing values 0, 1, 2, or 3.
+
+```solidity
+ function fromPackedCalls(
+    bytes calldata packed
+  ) internal view returns (Decoded memory _decoded) {
+    [...]
+    // Last 2 bits are directly mapped to the behavior on error
+    //@report-written since only 3 error cases are defined, need to check what would happen if error code == 0x03 happens to occur
+    _decoded.calls[i].behaviorOnError = (flags & 0xC0) >> 6;
+  }
+```
+
+In `_dispatchGuest`, failed sub-calls (success == false) are handled in an *if (!success) block, but behaviorOnError = 3* skips all branches (0: ignore, 1: revert, 2: abort). 
+
+Execution continues to the event emission block, where if `(!success && tx.behaviorOnError == 3)` evaluates to true, this will emit `CallSucceeded` event  despite the failure due to unaccepted behaviorOnError value. This causes a silent failure, misleading off-chain indexers and users into believing the call succeeded.
+
+**Impact** Breaks observability, as off-chain systems (e.g., indexers, user interfaces) rely on accurate event emissions to track transaction outcomes. Users may assume a transaction succeeded when it failed, leading to potential accounting errors or user confusion in batched transactions. No direct fund loss occurs, but the incorrect event emission impacts protocol correctness.
+
+**Proof of Concepts**
+1. Create a test case that constructs a packed payload with a sub-call having `behaviorOnError = 3`.
+2. Ensure the sub-call fails by not having enough balance in `Guest` contract.
+3. Verify that the `CallSucceeded` event is emitted despite the failure.
+
+Find the proof of code in the test file [`Guest.t.sol`](test/modules/guest/Guest.t.sol):
+<details>
+<summary>Proof of Code</summary>
+
+```solidity
+  function test_fallback_Success_With_Invalid_Behavior_On_Error_set_as_3() external {
+    uint8 globalFlag = 0x11; // 00010001 binary
+    address randomAddress = makeAddr("random address");
+    address[] memory parentWallets = new address[](0);
+    Payload.Call[] memory calls = new Payload.Call[](1);
+    calls[0] = Payload.Call({
+      to: randomAddress,
+      value: uint256(100000000000000000),
+      data: bytes(""),
+      gasLimit: uint256(0),
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: uint256(3)
+    });
+    Payload.Decoded memory decodedNew = Payload.Decoded({
+      kind: Payload.KIND_TRANSACTIONS,
+      noChainId: false,
+      // Transaction kind
+      calls: calls,
+      space: uint256(0),
+      nonce: uint256(0),
+      // Message kind
+      message: bytes(""),
+      // Config update kind
+      imageHash: bytes32(0),
+      // Digest kind for 1271
+      digest: bytes32(0),
+      // Parent wallets
+      parentWallets: parentWallets
+    });
+    // Call flags = 0xC0 to 0xC3 for behaviorOnError = 3
+    // We want self call to avoid providing address, so bit 0 = 1
+    // behaviorOnError = 3 → bits 6-7 = 11
+    // So: 11000001 = 0xC1
+    uint8 callFlags = 0xC2; // Self call + behaviorOnError = 3
+    bytes memory packed = abi.encodePacked(
+      uint8(globalFlag), // 0x11
+      uint8(callFlags), // 0xC2
+      randomAddress,
+      uint256(100000000000000000)
+    );
+    
+    bytes32 opHash = Payload.hashFor(decodedNew, address(guest));
+    vm.expectEmit(true, true, true, true);
+    emit CallSucceeded(opHash, 0);
+    vm.prank(address(guest));
+    (bool ok,) = address(guest).call(packed);
+    assertTrue(ok);
+  }
+```
+</details>
+
+**Recommended mitigation**

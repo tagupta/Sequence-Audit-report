@@ -237,7 +237,7 @@ library SessionSig {
 
         // Update root
         {
-          bytes32 permissionHash = _leafHashForPermissions(encoded[pointerStart:pointer]);//@note starting from signer uptil the last parameter rule 
+          bytes32 permissionHash = _leafHashForPermissions(encoded[pointerStart:pointer]); //@note starting from signer uptil the last parameter rule
           sig.imageHash =
             sig.imageHash != bytes32(0) ? LibOptim.fkeccak256(sig.imageHash, permissionHash) : permissionHash;
         }

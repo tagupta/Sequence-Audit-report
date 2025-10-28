@@ -8,7 +8,7 @@ import { Payload } from "../Payload.sol";
 import { ICheckpointer, Snapshot } from "../interfaces/ICheckpointer.sol";
 import { IERC1271, IERC1271_MAGIC_VALUE_HASH } from "../interfaces/IERC1271.sol";
 import { ISapient, ISapientCompact } from "../interfaces/ISapient.sol";
-import {console2} from 'forge-std/console2.sol';
+import { console2 } from "forge-std/console2.sol";
 
 using LibBytes for bytes;
 using Payload for Payload.Decoded;
@@ -40,30 +40,30 @@ library BaseSig {
   error UnusedSnapshot(Snapshot _snapshot);
   /// @notice Error thrown when the signature flag is invalid
   error InvalidSignatureFlag(uint256 _flag);
-  
+
   //@note The hash of a signer leaf is computed as
   function _leafForAddressAndWeight(address _addr, uint256 _weight) internal pure returns (bytes32) {
     return keccak256(abi.encodePacked("Sequence signer:\n", _addr, _weight));
   }
-  
+
   //@note The hash of a nested tree is computed as:
   //@note  this allows for certain sets of signers to be grouped in such a way that their signing power is limited by a threshold.
   function _leafForNested(bytes32 _node, uint256 _threshold, uint256 _weight) internal pure returns (bytes32) {
     return keccak256(abi.encodePacked("Sequence nested config:\n", _node, _threshold, _weight));
   }
-  
+
   //@note The hash of a sapient signer leaf is:
   function _leafForSapient(address _addr, uint256 _weight, bytes32 _imageHash) internal pure returns (bytes32) {
     return keccak256(abi.encodePacked("Sequence sapient config:\n", _addr, _weight, _imageHash));
   }
-  
+
   //@note The hash of a hardcoded signature leaf is computed as:
   function _leafForHardcodedSubdigest(
     bytes32 _subdigest
   ) internal pure returns (bytes32) {
     return keccak256(abi.encodePacked("Sequence static digest:\n", _subdigest));
   }
- 
+
   //@note The hash of an any address hardcoded signature leaf is computed as:
   function _leafForAnyAddressSubdigest(
     bytes32 _anyAddressSubdigest
@@ -113,7 +113,8 @@ library BaseSig {
     }
 
     // If signature type is 01 or 11 we do a chained signature
-    if (signatureFlag & 0x01 == 0x01) { //@note this signarure is chained 
+    if (signatureFlag & 0x01 == 0x01) {
+      //@note this signarure is chained
       return recoverChained(_payload, _checkpointer, snapshot, _signature[rindex:]);
     }
 
@@ -237,7 +238,7 @@ library BaseSig {
           bytes32 s;
           uint8 v;
           (r, s, v, rindex) = _signature.readRSVCompact(rindex); //read 64 bytes
-          
+
           //@note if (signer == address(0)) {
           //     return (address(0), RecoverError.InvalidSignature, bytes32(0));
           // }
@@ -410,7 +411,7 @@ library BaseSig {
           bytes32 s;
           uint8 v;
           (r, s, v, rindex) = _signature.readRSVCompact(rindex);
-          
+
           //@audit-low this can return address 0 which is not handled
           address addr = ecrecover(keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", _opHash)), v, r, s);
 

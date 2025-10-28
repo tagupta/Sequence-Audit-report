@@ -39,7 +39,7 @@ contract Implementation is SelfAuth {
   ) internal {
     //@note stores the implementation address at the slot value defined by the address of this contract
     assembly {
-      sstore(address(), _imp) 
+      sstore(address(), _imp)
     }
   }
 
