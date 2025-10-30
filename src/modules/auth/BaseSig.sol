@@ -206,7 +206,6 @@ library BaseSig {
     bytes32 _opHash,
     bytes calldata _signature
   ) internal view returns (uint256 weight, bytes32 root) {
-    console2.log("reached here");
     unchecked {
       uint256 rindex;
 
@@ -242,7 +241,7 @@ library BaseSig {
           //@note if (signer == address(0)) {
           //     return (address(0), RecoverError.InvalidSignature, bytes32(0));
           // }
-          //@audit-med/low the addess zero is not handled
+          //@audit-low the addess zero is not handled
           address addr = ecrecover(_opHash, v, r, s);
           //@audit-q do we not have a way to validated this recovered address against any address?
 

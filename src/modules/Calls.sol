@@ -78,7 +78,7 @@ abstract contract Calls is ReentrancyGuard, BaseAuth, Nonce {
       // Reset the error flag
       // onlyFallback calls only apply when the immediately preceding transaction fails
       errorFlag = false;
-
+      //@report-written not passing gas based off EIP 150
       uint256 gasLimit = call.gasLimit;
       if (gasLimit != 0 && gasleft() < gasLimit) {
         revert NotEnoughGas(_decoded, i, gasleft());

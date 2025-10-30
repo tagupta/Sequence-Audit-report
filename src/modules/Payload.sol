@@ -2,7 +2,7 @@
 pragma solidity ^0.8.27;
 
 import { LibBytes } from "../utils/LibBytes.sol";
-import {console2} from 'forge-std/console2.sol';
+import { console2 } from "forge-std/console2.sol";
 
 using LibBytes for bytes;
 

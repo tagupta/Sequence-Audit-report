@@ -168,10 +168,10 @@ library SessionSig {
           bytes32 s;
           uint8 v;
           (r, s, v, pointer) = encodedSignature.readRSVCompact(pointer);
-
+          //@audit-low relayers can easily manipuate the encoded signature by swapping the flag bits as the digest doesn't not store any information related to flag for callSignatures
           bytes32 callHash = hashCallWithReplayProtection(payload, i);
           //@note Using standard ecrecover without checking for signature malleability
-          //@audit-low
+          //@report-written
           callSignature.sessionSigner = ecrecover(callHash, v, r, s);
           if (callSignature.sessionSigner == address(0)) {
             revert SessionErrors.InvalidSessionSigner(address(0));
@@ -409,6 +409,7 @@ library SessionSig {
   /// @param payload The payload to hash
   /// @param callIdx The index of the call to hash
   /// @return callHash The hash of the call with replay protection
+  //@audit-high not protected against replay attack
   function hashCallWithReplayProtection(
     Payload.Decoded calldata payload,
     uint256 callIdx

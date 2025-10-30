@@ -20,6 +20,7 @@ contract Guest {
 
   /// @notice Fallback function
   /// @dev Dispatches the guest call
+  //@report-written this function can be exploited to withdraw funds from guest contract
   fallback() external payable {
     Payload.Decoded memory decoded = Payload.fromPackedCalls(msg.data);
     console2.log(decoded.noChainId);
@@ -27,7 +28,6 @@ contract Guest {
     _dispatchGuest(decoded, opHash);
   }
 
-  //@audit-med gas grifing attack
   function _dispatchGuest(Payload.Decoded memory _decoded, bytes32 _opHash) internal {
     bool errorFlag = false;
 
@@ -46,7 +46,7 @@ contract Guest {
       errorFlag = false;
       //@note Maximum amount of gas you're willing to spend on this transaction
       uint256 gasLimit = call.gasLimit;
-      //@audit-q bypassing calls with zero gas limit
+      //@report-written gas precheck doesn't account for eip 150 - 63/64 rule
       if (gasLimit != 0 && gasleft() < gasLimit) {
         revert Calls.NotEnoughGas(_decoded, i, gasleft());
       }
@@ -56,10 +56,8 @@ contract Guest {
       }
 
       //@note behaviorOnError can have 4 valid values and the if conditions are handling only 3 errors, causing the unexpected value (0x03) to emit the CallSuccessed event and creating inconsistency for off-chain systems
-      console2.log("to, value", call.to, call.value);
-      
       bool success = LibOptim.call(call.to, call.value, gasLimit == 0 ? gasleft() : gasLimit, call.data);
-  
+
       if (!success) {
         if (call.behaviorOnError == Payload.BEHAVIOR_IGNORE_ERROR) {
           errorFlag = true;
@@ -76,7 +74,7 @@ contract Guest {
           break;
         }
       }
-   
+
       emit Calls.CallSucceeded(_opHash, i);
     }
   }
