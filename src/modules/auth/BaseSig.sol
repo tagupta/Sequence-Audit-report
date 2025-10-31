@@ -343,14 +343,13 @@ library BaseSig {
 
         // Nested (0x06)
         if (flag == FLAG_NESTED) {
-          //@audit-med this doesn't align with the documentation, incorrect bits read for exteranl weight and internal threshold
+          //@report-written this doesn't align with the documentation, incorrect bits read for exteranl weight and internal threshold
           // Unused free bits:
           // - XX00 : Weight (00 = dynamic, 01 = 1, 10 = 2, 11 = 3)
           // - 00XX : Threshold (00 = dynamic, 01 = 1, 10 = 2, 11 = 3)
 
           // Enter a branch of the signature merkle tree
           // but with an internal threshold and an external fixed weight
-          console2.log("Present here");
           uint256 externalWeight = uint8(firstByte & 0x0c) >> 2; //@note uint8(firstByte & 0x03) => external weight
           if (externalWeight == 0) {
             (externalWeight, rindex) = _signature.readUint8(rindex);

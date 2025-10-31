@@ -12,7 +12,7 @@ import { Stage1Module } from "src/Stage1Module.sol";
 import { SessionErrors } from "src/extensions/sessions/SessionErrors.sol";
 import { SessionManager } from "src/extensions/sessions/SessionManager.sol";
 import { SessionSig } from "src/extensions/sessions/SessionSig.sol";
-import { SessionPermissions } from "src/extensions/sessions/explicit/IExplicitSessionManager.sol";
+import { SessionPermissions, SessionUsageLimits } from "src/extensions/sessions/explicit/IExplicitSessionManager.sol";
 import {
   ParameterOperation, ParameterRule, Permission, UsageLimit
 } from "src/extensions/sessions/explicit/Permission.sol";
@@ -22,6 +22,10 @@ import { ISapient } from "src/modules/interfaces/ISapient.sol";
 
 import { CanReenter } from "test/mocks/CanReenter.sol";
 import { MockERC20 } from "test/mocks/MockERC20.sol";
+
+import { ExplicitSessionManagerHarness } from "./explicit/ExplicitSessionManager.t.sol";
+
+import { ExtendedSessionTestBase } from "../../integrations/extensions/sessions/ExtendedSessionTestBase.sol";
 
 contract SessionManagerTest is SessionTestBase {
 
@@ -947,4 +951,7 @@ contract SessionManagerTest is SessionTestBase {
       sessionManager.recoverSapientSignature(payload, encodedSigIdx1);
     }
   }
+
+  //@audit-poc replay attack
+
 }

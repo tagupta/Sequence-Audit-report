@@ -272,7 +272,6 @@ library Payload {
   function hash(
     Decoded memory _decoded
   ) internal view returns (bytes32) {
-    console2.log("address, this from payload", address(this));
     bytes32 domain = domainSeparator(_decoded.noChainId, address(this));
     bytes32 structHash = toEIP712(_decoded);
     return keccak256(abi.encodePacked("\x19\x01", domain, structHash));

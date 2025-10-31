@@ -64,8 +64,6 @@ contract SessionManager is ISapient, ImplicitSessionManager, ExplicitSessionMana
       }
 
       // Check if this call could cause usage limits to be skipped
-      //@note is this the right error kind to check against?
-      //@audit-low can be incorrect error
       if (call.behaviorOnError == Payload.BEHAVIOR_ABORT_ON_ERROR) {
         revert SessionErrors.InvalidBehavior();
       }

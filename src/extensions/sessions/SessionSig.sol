@@ -168,7 +168,7 @@ library SessionSig {
           bytes32 s;
           uint8 v;
           (r, s, v, pointer) = encodedSignature.readRSVCompact(pointer);
-          //@audit-low relayers can easily manipuate the encoded signature by swapping the flag bits as the digest doesn't not store any information related to flag for callSignatures
+          //@report-written relayers can easily manipuate the encoded signature by swapping the flag bits as the digest doesn't not store any information related to flag for callSignatures
           bytes32 callHash = hashCallWithReplayProtection(payload, i);
           //@note Using standard ecrecover without checking for signature malleability
           //@report-written
