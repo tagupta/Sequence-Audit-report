@@ -106,7 +106,7 @@ library BaseSig {
         bytes memory checkpointerData = _signature[rindex:rindex + checkpointerDataSize];
 
         // Call the middleware
-        snapshot = ICheckpointer(_checkpointer).snapshotFor(address(this), checkpointerData);
+        snapshot = ICheckpointer(_checkpointer).snapshotFor(address(this), checkpointerData); //imageHash, checkpoint
 
         rindex += checkpointerDataSize;
       }
