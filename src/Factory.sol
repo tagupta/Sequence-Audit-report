@@ -22,6 +22,7 @@ contract Factory {
   //Returns the runtime code
   //Contract is now deployed with implementation set
 
+//@report-written reverts when account already exists, not compatible with erc4337
   function deploy(address _mainModule, bytes32 _salt) public payable returns (address _contract) {
     bytes memory code = abi.encodePacked(Wallet.creationCode, uint256(uint160(_mainModule)));
     assembly {

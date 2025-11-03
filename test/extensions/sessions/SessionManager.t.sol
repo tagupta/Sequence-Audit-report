@@ -952,6 +952,4 @@ contract SessionManagerTest is SessionTestBase {
     }
   }
 
-  //@audit-poc replay attack
-
 }
