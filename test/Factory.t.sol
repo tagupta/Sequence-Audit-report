@@ -4,7 +4,7 @@ pragma solidity ^0.8.27;
 import { Factory } from "../src/Factory.sol";
 import { AdvTest } from "./utils/TestUtils.sol";
 
-import {console2} from 'forge-std/console2.sol' ;
+import { console2 } from "forge-std/console2.sol";
 
 contract FactoryTest is AdvTest {
 
@@ -30,17 +30,16 @@ contract FactoryTest is AdvTest {
     address result = factory.deploy{ value: _value }(_mainModule, _salt);
     assertEq(result.balance, _value);
   }
-  
+
   //@audit-poc
   function test_deployTwice_Reverts(address _mainModule, bytes32 _salt) external {
     address result = factory.deploy(_mainModule, _salt);
     console2.log("result.code.length: ", result.code.length);
-     assertEq(result.code.length, 33, "Wallet size mismatch");
-     
+    assertEq(result.code.length, 33, "Wallet size mismatch");
+
     // vm.expectRevert();
     result = factory.deploy(_mainModule, _salt);
     assertEq(result.code.length, 33, "Wallet size mismatch");
-
   }
 
 }

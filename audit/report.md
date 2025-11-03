@@ -307,6 +307,78 @@ Paste the following test case in `BaseSig.t.sol`
        return recoverChained(_payload, _checkpointer, snapshot, _signature[rindex:]);
      }
 ```
+### [H-3] Signature Parsing Corruption in `recover()` When `_ignoreCheckpointer = true` Allows Complete Authentication Bypass
+
+**Description** The `BaseSigImp.recover()` function contains a critical parsing vulnerability when processing signatures with the checkpointer flag set but `_ignoreCheckpointer = true`. Due to improper pointer arithmetic, the function fails to advance the read index past checkpointer data when it should be ignored, causing subsequent signature components `(checkpoint, threshold, and merkle tree data)` to be read from incorrect positions in the signature byte array.
+
+This allows an attacker to craft malicious signatures where:
+- Checkpointer data size bytes are misinterpreted as threshold values
+- Checkpointer data content is misinterpreted as merkle tree nodes
+- Specifically, the `FLAG_SUBDIGEST` merkle node can be triggered to set weight to `type(uint256).max`
+
+The root cause is in the checkpointer handling logic where rindex is not advanced past checkpointer data when` _ignoreCheckpointer = true`, corrupting the entire subsequent parsing flow.
+
+**Impact**
+- **Complete authentication bypass:** Any signature can be crafted to validate with maximum weight
+- **Total signature validation failure:** The cryptographic security guarantees are completely broken
+- **Funds theft and unauthorized access:** Attackers can execute arbitrary transactions on behalf of any wallet
+  
+Because the parser now trusts bytes that were supposed to be opaque checkpointer data, an attacker can bypass the per-segment weight guard (e.g., set threshold to zero or inject arbitrary subtree data), undermining chained-signature validation and causing desynchronised or forged configurations.
+
+This is a real parsing flaw as the contracts should always advance past the declared length (or reject non-zero payloads) even when ignoring the middleware call.
+  
+**Proof of Concepts**
+1. The first byte of the checkpointer data length becomes the checkpoint value.
+2. The second byte of the checkpointer data length becomes the threshold value.
+3. The third byte of the checkpointer data length becomes the flag for merkle tree node selection. Yielding `FLAG_SUBDIGEST` which sets weight to `type(uint256).max` without any genuine threshold encoding. No actual signer data is ever parsed, yet the segment passes the weight check.
+
+
+4. The following bytes are the opHash.
+
+Attack Path: 
+1. Suppose a wallet has a chained configuration update, every segment must meet the internal threshold check before the final payload executes. The contract calls `recover(_payload, _signature[rindex:nrindex], true, checkpointer)` for each segment after the first one.
+2. An Attacker could craft one such segment with the following structure:
+   - Top level signature flag: `0x40` (chained + ignore checkpointer)
+   - Checkpointer address: any valid address (not used)
+   - Checkpointer data size: `0x02 0x01 0x50` (2 bytes length, interpreted as checkpoint=2, threshold=1, flag=0x50)
+   - OpHash: valid opHash bytes
+   When processed, the parser misreads the checkpointer data size bytes as actual values, leading to:
+   - checkpoint = 2
+   - threshold = 1
+   - flag = 0x50 → triggers `FLAG_SUBDIGEST` → weight = `type(uint256).max`
+3. The segment passes the weight check since `type(uint256).max >= 1`, allowing the attacker to bypass authentication entirely.
+4. By repeating this for each segment they cannot satisfy, the attacker forges any configuration update or payload signature they want, ultimately allowing unauthorized transactions or config changes to execute.
+
+Paste the following test case in `BaseSig.t.sol`
+
+```solidity
+ function test_Ignore_Checkpointer_Leaves_CheckpointerData_InStream(
+  ) external {
+    Payload.Decoded memory payload;
+    bytes32 opHash = Payload.hashFor(payload, address(baseSigImp));
+    bytes memory opHashBytes = abi.encodePacked(opHash);
+    
+    address checkpointer = makeAddr("checkpointer");
+    bytes memory signature = abi.encodePacked(
+      bytes1(0x44), //Top level signature -> only checkpointer usage bit is set
+      bytes20(checkpointer), //Checkpointer address
+      bytes1(0x02), //Byte 1, Reading Checkpoint value
+      bytes1(uint8(0x01)), //+ Byte 2 , Read as threshold
+      bytes1(uint8(0x50)), //+ Byte 3 , Read as flag for branch signature (0101 0000 & 1111 0000 ) >> 4 => 101 => 5
+      opHashBytes
+    );
+
+    (uint256 threshold, uint256 weight,, uint256 checkpoint, bytes32 recoveredOpHash) =
+      baseSigImp.recoverPub(payload, signature, true, address(0));
+
+    assertEq(threshold, 1,'Threshold not set as intended');
+    assertEq(weight, type(uint256).max, "Weight not set as intended");
+    assertEq(checkpoint, 2,'Checkpoint not set as intended');
+    assertEq(recoveredOpHash, opHash, "OpHash didn't match");
+  }
+```
+
+**Recommended mitigation** Always consume the declared checkpointer payload, even when `_ignoreCheckpointer` is true. Read the 3-byte length, advance rindex by that many bytes, and (optionally) copy the data into a scratch buffer so the decoder stays aligned.
 
 ### [M-1] Relayer can escalate privileges by swapping unsigned call flag in `recoverSignature` of `SessionSig.sol`
 

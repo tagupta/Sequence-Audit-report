@@ -4,6 +4,7 @@ pragma solidity ^0.8.27;
 
 import { ExtendedSessionTestBase, Factory } from "../../integrations/extensions/sessions/ExtendedSessionTestBase.sol";
 
+import { console2 } from "forge-std/console2.sol";
 import { Stage1Module } from "src/Stage1Module.sol";
 import { SessionPermissions, SessionUsageLimits } from "src/extensions/sessions/explicit/IExplicitSessionManager.sol";
 import {
@@ -12,7 +13,6 @@ import {
 import { Payload } from "src/modules/Payload.sol";
 import { Emitter } from "test/mocks/Emitter.sol";
 import { PrimitivesRPC } from "test/utils/PrimitivesRPC.sol";
-import { console2 } from 'forge-std/console2.sol';
 
 contract PartialSignatureReplayAttack is ExtendedSessionTestBase {
 
@@ -29,7 +29,7 @@ contract PartialSignatureReplayAttack is ExtendedSessionTestBase {
       onlyFallback: false,
       behaviorOnError: Payload.BEHAVIOR_REVERT_ON_ERROR
     });
-    
+
     //creating this payload to fail, so the nonce couldn't be consumed
     payloadWalletA.calls[1] = Payload.Call({
       to: address(emitter),
@@ -77,15 +77,15 @@ contract PartialSignatureReplayAttack is ExtendedSessionTestBase {
 
     //Wallet B reusing the signature of wallet A and executing the partial payload by just calling call[0]
     Payload.Call[] memory calls = payloadWalletA.calls;
-    assembly{
-        mstore(calls,1)
+    assembly {
+      mstore(calls, 1)
     }
 
     bytes memory packedPayloadB = PrimitivesRPC.toPackedPayload(vm, payloadWalletA);
 
     Permission[] memory permissions = sessionPerms.permissions;
     assembly {
-        mstore(permissions, 1)
+      mstore(permissions, 1)
     }
     vm.prank(address(walletB));
     //Signature replay arrack with partial payload

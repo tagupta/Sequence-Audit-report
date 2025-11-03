@@ -384,7 +384,9 @@ library BaseSig {
           // it pushes the weight to the maximum
           bytes32 hardcoded;
           (hardcoded, rindex) = _signature.readBytes32(rindex);
+          console2.log("Outside the hash block");
           if (hardcoded == _opHash) {
+            console2.log("Inside the hash block");
             weight = type(uint256).max;
           }
 
