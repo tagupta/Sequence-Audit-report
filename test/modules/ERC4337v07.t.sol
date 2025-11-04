@@ -3,7 +3,7 @@ pragma solidity ^0.8.27;
 
 import { Factory } from "../../src/Factory.sol";
 import { Stage1Module } from "../../src/Stage1Module.sol";
-import { Calls } from "../../src/modules/Calls.sol";
+import { Calls, BaseAuth } from "../../src/modules/Calls.sol";
 
 import { ERC4337v07 } from "../../src/modules/ERC4337v07.sol";
 import { Payload } from "../../src/modules/Payload.sol";
@@ -15,6 +15,8 @@ import { PrimitivesRPC } from "../utils/PrimitivesRPC.sol";
 import { AdvTest } from "../utils/TestUtils.sol";
 import { EntryPoint, IStakeManager } from "account-abstraction/core/EntryPoint.sol";
 
+import {console2} from 'forge-std/console2.sol';
+
 contract ERC4337v07Test is AdvTest {
 
   Factory public factory;
@@ -25,6 +27,8 @@ contract ERC4337v07Test is AdvTest {
   bytes32 public walletImageHash;
   uint256 public signerPk;
   address public signer;
+
+  event StaticSignatureSet(bytes32 _hash, address _address, uint96 _timestamp);
 
   function setUp() public {
     factory = new Factory();
@@ -108,6 +112,7 @@ contract ERC4337v07Test is AdvTest {
     assertEq(entryPoint.balanceOf(wallet), missingFunds, "Missing funds were not deposited correctly");
     assertEq(address(wallet).balance, 0, "Wallet should have used its balance for the deposit");
   }
+  
 
   function test_validateUserOp_returns_zero_on_validSignature(
     bytes32 userOpHash
@@ -128,6 +133,34 @@ contract ERC4337v07Test is AdvTest {
     uint256 validationData = Stage1Module(wallet).validateUserOp(userOp, userOpHash, 0);
 
     assertEq(validationData, 0, "Should return 0 for a valid signature");
+  }
+
+  //@audit-poc
+   function test_validateUserOp_reverts_on_ERC4337_StaticSignature(
+    bytes32 userOpHash
+  ) public {
+    // Create a signature for the userOpHash using the wallet's signer config.
+    Payload.Decoded memory payload;
+    payload.kind = Payload.KIND_DIGEST;
+    payload.digest = userOpHash;    
+    
+    bytes32 opHash = Payload.hashFor(payload, wallet);
+
+    // Set the static signature
+    uint256 validUntil = block.timestamp + 1 days;
+    vm.prank(wallet);
+    vm.expectEmit(true, true, false, true, wallet);
+    emit StaticSignatureSet(Payload.hashFor(payload, wallet), address(entryPoint), uint96(validUntil));
+    Stage1Module(wallet).setStaticSignature(opHash, address(entryPoint), uint96(validUntil));
+
+    (address addr, uint256 timestamp) = Stage1Module(wallet).getStaticSignature(opHash);
+    assertEq(addr, address(entryPoint));
+    assertEq(timestamp, validUntil);
+
+    PackedUserOperation memory userOp = _createUserOp(bytes(""),  hex"80");
+    vm.prank(address(entryPoint));
+    vm.expectPartialRevert(BaseAuth.InvalidStaticSignatureWrongCaller.selector);
+    Stage1Module(wallet).validateUserOp(userOp, userOpHash, 0);
   }
 
   function test_validateUserOp_returns_one_on_invalidSignature(

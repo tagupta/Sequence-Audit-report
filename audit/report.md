@@ -138,7 +138,6 @@ contract ReplaySignature is ExtendedSessionTestBase {
 2. Alternatively, extend the signed pre-image to match the EIP-712 domain model `(chainId, verifyingContract, wallet, etc.)` so signatures cannot be replayed on contracts with a different msg.sender.
    
 3. Consider adding a second-level check in `SessionManager` that rejects signatures whose imageHash was not issued specifically for the calling wallet, rather than only verifying the recovered session signer.
-
 ### [H-2] Checkpointer Bypass Via Chained Signature Allows Evicted Signers to Maintain Wallet Access
 
 **Description** Consider a scenario where the top level signature flag is set to chained signature with no checkpointer bit set. In this case, the `recover` function in `BaseSig.sol` completely bypasses the checkpointer verification logic as for the chained signatures, `_ignoreCheckpointer` is set to true. Allowing attackers to:
@@ -808,6 +807,84 @@ contract PartialSignatureReplayAttack is ExtendedSessionTestBase {
 </details>
 
 **Recommended mitigation**
+
+### [M-4] Static signatures are broken in ERC-4337 context, leading to denial of service 
+
+**Description** Sequence wallet supports static signatures as per ERC-4337, allowing users to provide precomputed signatures that do not require on-chain verification. However, the current implementation does not correctly handle static signatures in the context of account abstraction, leading to potential denial of service when such signatures are used.
+
+`validateUserOp()` enforces the msg.sender to be `entryPoint`, but then performs signature verification via an external call to itself `this.isValidSignature(userOpHash, userOp.signature)`, changing the context of msg.sender to the wallet itself. As a result, when a static signature is provided, the `BaseAuth.signatureValidation()` attempts to verify the signature against the wallet's own address instead of the expected signature extracted from the static signature.
+
+```solidity
+if (addr != address(0) && addr != msg.sender) {
+        revert InvalidStaticSignatureWrongCaller(opHash, msg.sender, addr);
+}
+```
+
+Hence, any static signature provided will fail verification unless it is specifically crafted to match the wallet's address, which is not feasible in practice. This leads to a denial of service for users attempting to utilize static signatures.
+
+Code Eample from `BaseAuth.sol`:
+
+```solidity
+function signatureValidation(
+    Payload.Decoded memory _payload,
+    bytes calldata _signature
+  ) internal view virtual returns (bool isValid, bytes32 opHash) {
+    // Read first bit to determine if static signature is used
+    bytes1 signatureFlag = _signature[0];
+
+    if (signatureFlag & 0x80 == 0x80) {
+      opHash = _payload.hash();
+
+      (address addr, uint256 timestamp) = _getStaticSignature(opHash);
+      if (timestamp <= block.timestamp) {
+        revert InvalidStaticSignatureExpired(opHash, timestamp);
+      }
+@>    if (addr != address(0) && addr != msg.sender) {
+        revert InvalidStaticSignatureWrongCaller(opHash, msg.sender, addr);
+      }
+
+      return (true, opHash);
+    }
+    [...]
+  }
+
+```
+
+**Impact** The issue breaks a supported signature mode (static signatures with bound caller) for ERC‑4337 flows, preventing valid operations and enabling **DoS** when such approvals are required. It does not compromise signature forgery or funds directly, but it blocks operations that depend on caller‑bound static signatures and causes systemic failures in those paths.
+
+**Proof of Concepts**
+
+```solidity
+   function test_validateUserOp_reverts_on_ERC4337_StaticSignature(
+    bytes32 userOpHash
+  ) public {
+    // Create a signature for the userOpHash using the wallet's signer config.
+    Payload.Decoded memory payload;
+    payload.kind = Payload.KIND_DIGEST;
+    payload.digest = userOpHash;    
+    
+    bytes32 opHash = Payload.hashFor(payload, wallet);
+
+    // Set the static signature
+    uint256 validUntil = block.timestamp + 1 days;
+    vm.prank(wallet);
+    vm.expectEmit(true, true, false, true, wallet);
+    emit StaticSignatureSet(Payload.hashFor(payload, wallet), address(entryPoint), uint96(validUntil));
+    Stage1Module(wallet).setStaticSignature(opHash, address(entryPoint), uint96(validUntil));
+
+    (address addr, uint256 timestamp) = Stage1Module(wallet).getStaticSignature(opHash);
+    assertEq(addr, address(entryPoint));
+    assertEq(timestamp, validUntil);
+
+    PackedUserOperation memory userOp = _createUserOp(bytes(""),  hex"80");
+    vm.prank(address(entryPoint));
+    //Proving that validateUserOp reverts due to wrong comparison of msg.sender and static signature addr
+    vm.expectPartialRevert(BaseAuth.InvalidStaticSignatureWrongCaller.selector);
+    Stage1Module(wallet).validateUserOp(userOp, userOpHash, 0);
+  }
+```
+
+**Recommended mitigation** Avoid the external self‑call and explicitly propagate the intended caller into signature validation so that static signatures bound to the entrypoint succeed under ERC‑4337.
 
 ### [L-1] The NESTED flag implementation incorrectly masks bits in `recoverBranch()` of `BaseSig.sol`
 

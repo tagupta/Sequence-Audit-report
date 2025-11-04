@@ -379,7 +379,8 @@ contract TestStage1Module is AdvTest {
     result = Stage1Module(wallet).isValidSignature(_digest, hex"80");
     assertEq(result, bytes4(0x1626ba7e));
   }
-
+  
+  //@audit-poc
   function test_static_signature_specific_address(
     bytes32 _digest,
     bytes32 _imageHash,
@@ -429,6 +430,8 @@ contract TestStage1Module is AdvTest {
     );
     Stage1Module(wallet).isValidSignature(_digest, hex"80");
   }
+
+
 
   function test_reverts_invalid_static_signature_expired(
     bytes32 _digest,

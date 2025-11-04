@@ -9,6 +9,7 @@ import { IPartialAuth } from "../interfaces/IPartialAuth.sol";
 import { ISapient } from "../interfaces/ISapient.sol";
 import { BaseSig } from "./BaseSig.sol";
 import { SelfAuth } from "./SelfAuth.sol";
+import {console2} from 'forge-std/console2.sol';
 
 using Payload for Payload.Decoded;
 

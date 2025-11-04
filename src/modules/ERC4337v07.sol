@@ -7,6 +7,7 @@ import { ReentrancyGuard } from "./ReentrancyGuard.sol";
 import { IAccount, PackedUserOperation } from "./interfaces/IAccount.sol";
 import { IERC1271_MAGIC_VALUE_HASH } from "./interfaces/IERC1271.sol";
 import { IEntryPoint } from "./interfaces/IEntryPoint.sol";
+import {console2} from 'forge-std/console2.sol';
 
 /// @title ERC4337v07
 /// @author Agustin Aguilar, Michael Standen
@@ -37,6 +38,8 @@ abstract contract ERC4337v07 is ReentrancyGuard, IAccount, Calls {
     if (entrypoint == address(0)) {
       revert ERC4337Disabled();
     }
+    console2.log("msg.sender inside validateUserOp:", msg.sender);
+    console2.log("Signer address: ", userOp.sender);
 
     if (msg.sender != entrypoint) {
       revert InvalidEntryPoint(msg.sender);
