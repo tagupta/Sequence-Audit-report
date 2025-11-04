@@ -1,3 +1,183 @@
+---
+title: Sequence Audit Report
+author: Tanu Gupta
+date: Oct 23, 2025
+header-includes:
+  - \usepackage{titling}
+  - \usepackage{graphicx}
+---
+
+\begin{titlepage}
+    \centering
+    \begin{figure}[h]
+        \centering
+        \includegraphics[width=0.5\textwidth]{logo.pdf} 
+    \end{figure}
+    \vspace{2cm}
+    {\Huge\bfseries Sequence Audit Report\par}
+    \vspace{1cm}
+    {\Large Version 1.0\par}
+    \vspace{2cm}
+    {\Large\itshape Tanu Gupta, Code4rena\par}
+    \vfill
+    {\large \today\par}
+\end{titlepage}
+
+\maketitle
+
+<!-- Your report starts here! -->
+
+Prepared by: [Tanu Gupta](https://github.com/tagupta)
+
+Lead Security Researcher: [Tanu Gupta](https://github.com/tagupta)
+
+# Table of Contents
+- [Table of Contents](#table-of-contents)
+- [Protocol Summary](#protocol-summary)
+- [Disclaimer](#disclaimer)
+- [Risk Classification](#risk-classification)
+- [Audit Details](#audit-details)
+  - [Scope](#scope)
+  - [Roles](#roles)
+- [Executive Summary](#executive-summary)
+  - [Issues found](#issues-found)
+- [Findings](#findings)
+  - [High](#high)
+    - [\[H-1\] Missing Wallet Binding Enables Cross-Wallet Signature Replay in Session Calls](#h-1-missing-wallet-binding-enables-cross-wallet-signature-replay-in-session-calls)
+    - [\[H-2\] Checkpointer Bypass Via Chained Signature Allows Evicted Signers to Maintain Wallet Access](#h-2-checkpointer-bypass-via-chained-signature-allows-evicted-signers-to-maintain-wallet-access)
+    - [\[H-3\] Signature Parsing Corruption in `recover()` When `_ignoreCheckpointer = true` Allows Complete Authentication Bypass](#h-3-signature-parsing-corruption-in-recover-when-_ignorecheckpointer--true-allows-complete-authentication-bypass)
+  - [Medium](#medium)
+    - [\[M-1\] Relayer can escalate privileges by swapping unsigned call flag in `recoverSignature` of `SessionSig.sol`](#m-1-relayer-can-escalate-privileges-by-swapping-unsigned-call-flag-in-recoversignature-of-sessionsigsol)
+    - [\[M-2\] `deploy` in `Factory.sol` reverts when deploying a wallet that already exists](#m-2-deploy-in-factorysol-reverts-when-deploying-a-wallet-that-already-exists)
+    - [\[M-3\] Partial signature replay / front-running attack on session calls](#m-3-partial-signature-replay--front-running-attack-on-session-calls)
+    - [\[M-4\] Static signatures are broken in ERC-4337 context, leading to denial of service](#m-4-static-signatures-are-broken-in-erc-4337-context-leading-to-denial-of-service)
+    - [\[M-5\] `recoverSapientSignature` of `BaseAuth.sol` returns a constant instead of signer image hash, breaking sapient signature recovery](#m-5-recoversapientsignature-of-baseauthsol-returns-a-constant-instead-of-signer-image-hash-breaking-sapient-signature-recovery)
+  - [Low](#low)
+    - [\[L-1\] Nested `staticcall()` revert in `WebAuthn` library results in incorrect messageHash](#l-1-nested-staticcall-revert-in-webauthn-library-results-in-incorrect-messagehash)
+    - [\[L-2\] `ERC4337v07` Cannot Receive Native Token](#l-2-erc4337v07-cannot-receive-native-token)
+    - [\[L-3\] Using `ecrecover` directly vulnerable to signature malleability](#l-3-using-ecrecover-directly-vulnerable-to-signature-malleability)
+    - [\[L-4\] Missing validation for zero address in constructor parameter of `ERC4337v07` contract](#l-4-missing-validation-for-zero-address-in-constructor-parameter-of-erc4337v07-contract)
+    - [\[L-5\] Lack of domain separation in passkey root calculation in `_rootForPasskey` allows for cross-implementation image hash equivalence](#l-5-lack-of-domain-separation-in-passkey-root-calculation-in-_rootforpasskey-allows-for-cross-implementation-image-hash-equivalence)
+    - [\[L-6\] Zero-address signer accepted in recovery queue via `queuePayload` of `Recovery.sol` allows unauthorized queue entries with signers as `address(0)`](#l-6-zero-address-signer-accepted-in-recovery-queue-via-queuepayload-of-recoverysol-allows-unauthorized-queue-entries-with-signers-as-address0)
+    - [\[L-7\] Unbounded growth of recovery queue via `queuePayload` allows storage bloat](#l-7-unbounded-growth-of-recovery-queue-via-queuepayload-allows-storage-bloat)
+    - [\[L-8\] `_dispatchGuest` of `Guest.sol` fails silently via behaviorOnError equal to 3 leading to wrong emission of `Guest.CallSucceeded` event](#l-8-_dispatchguest-of-guestsol-fails-silently-via-behavioronerror-equal-to-3-leading-to-wrong-emission-of-guestcallsucceeded-event)
+    - [\[L-9\] `Guest.sol` allows anyone to drain ETH from its balance through unauthenticated payable fallback](#l-9-guestsol-allows-anyone-to-drain-eth-from-its-balance-through-unauthenticated-payable-fallback)
+    - [\[L-10\] Gas precheck doesn't account for `EIP-150's 63/64 rule`, causing calls to receive less gas than expected](#l-10-gas-precheck-doesnt-account-for-eip-150s-6364-rule-causing-calls-to-receive-less-gas-than-expected)
+    - [\[L-11\] Recovery module lacks mechanism to remove expired or executed payloads from `queuedPayloadHashes` in `Recovery.sol`](#l-11-recovery-module-lacks-mechanism-to-remove-expired-or-executed-payloads-from-queuedpayloadhashes-in-recoverysol)
+  - [Informational](#informational)
+    - [\[I-1\] The NESTED flag implementation incorrectly masks bits in `recoverBranch()` of `BaseSig.sol`](#i-1-the-nested-flag-implementation-incorrectly-masks-bits-in-recoverbranch-of-basesigsol)
+    - [\[I-2\] Potential Stack Exhaustion due to recursive structure](#i-2-potential-stack-exhaustion-due-to-recursive-structure)
+
+# Protocol Summary
+
+Sequence Ecosystem Wallet is a non-custodial smart wallet designed for chains and ecosystems. It combines passkeys, social auth, timed recovery keys, and sandboxed permissions to deliver higher security with less friction.
+
+The codebase represents the V3 implementation of this infrastructure, utilizing a minimal proxy pattern and a novel Merkle-proof based configuration approach for smart wallets.
+
+# Disclaimer
+
+I, Tanu Gupta makes all effort to find as many vulnerabilities in the code in the given time period, but holds no responsibilities for the findings provided in this document. A security audit by me is not an endorsement of the underlying business or product. The audit was time-boxed and the review of the code was solely on the security aspects of the Solidity implementation of the contracts.
+
+# Risk Classification
+
+|            |        | Impact |        |     |
+| ---------- | ------ | ------ | ------ | --- |
+|            |        | High   | Medium | Low |
+|            | High   | H      | H/M    | M   |
+| Likelihood | Medium | H/M    | M      | M/L |
+|            | Low    | M      | M/L    | L   |
+
+[Code4rena](https://docs.code4rena.com/bounties/bounty-criteria) severity matrix is used to determine severity. See the documentation for more details.
+
+# Audit Details
+
+The audit was performed over a period of nearly 2 weeks from Oct 8 to Oct 23, 2025. The codebase was reviewed in depth to identify potential security vulnerabilities, logic issues, and gas optimizations. 
+
+The findings correspond to the github repository [Sequence-Ecosystem/smart-wallets-v3](https://github.com/code-423n4/2025-10-sequence).
+
+## Scope
+
+| File   | 
+|---|
+| [src/Factory.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/Factory.sol) | 
+| [src/Guest.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/Guest.sol) | 
+| [src/Stage1Module.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/Stage1Module.sol) | 
+| [src/Stage2Module.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/Stage2Module.sol) | 
+| [src/Wallet.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/Wallet.sol) | 
+| [src/extensions/passkeys/Passkeys.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/passkeys/Passkeys.sol) | 
+| [src/extensions/recovery/Recovery.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/recovery/Recovery.sol) | 
+| [src/extensions/sessions/SessionErrors.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/sessions/SessionErrors.sol) | 
+| [src/extensions/sessions/SessionManager.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/sessions/SessionManager.sol) | 
+| [src/extensions/sessions/SessionSig.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/sessions/SessionSig.sol) | 
+| [src/extensions/sessions/explicit/ExplicitSessionManager.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/sessions/explicit/ExplicitSessionManager.sol) |
+| [src/extensions/sessions/explicit/IExplicitSessionManager.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/sessions/explicit/IExplicitSessionManager.sol) |
+| [src/extensions/sessions/explicit/Permission.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/sessions/explicit/Permission.sol) | 
+| [src/extensions/sessions/explicit/PermissionValidator.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/sessions/explicit/PermissionValidator.sol) | 
+| [src/extensions/sessions/implicit/Attestation.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/sessions/implicit/Attestation.sol) | 
+| [src/extensions/sessions/implicit/ISignalsImplicitMode.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/sessions/implicit/ISignalsImplicitMode.sol) | 
+| [src/extensions/sessions/implicit/ImplicitSessionManager.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/extensions/sessions/implicit/ImplicitSessionManager.sol) | 
+| [src/modules/Calls.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/Calls.sol) | 
+| [src/modules/ERC4337v07.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/ERC4337v07.sol) | 
+| [src/modules/Hooks.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/Hooks.sol) | 
+| [src/modules/Implementation.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/Implementation.sol) | 
+| [src/modules/Nonce.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/Nonce.sol) | 
+| [src/modules/Payload.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/Payload.sol) | 
+| [src/modules/ReentrancyGuard.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/ReentrancyGuard.sol) | 
+| [src/modules/Storage.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/Storage.sol) | 
+| [src/modules/auth/BaseAuth.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/auth/BaseAuth.sol) | 
+| [src/modules/auth/BaseSig.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/auth/BaseSig.sol) | 
+| [src/modules/auth/SelfAuth.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/auth/SelfAuth.sol) |
+| [src/modules/auth/Stage1Auth.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/auth/Stage1Auth.sol) |
+| [src/modules/auth/Stage2Auth.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/auth/Stage2Auth.sol) | 
+| [src/modules/interfaces/IAccount.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/IAccount.sol) | 
+| [src/modules/interfaces/IAuth.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/IAuth.sol) | 
+| [src/modules/interfaces/ICheckpointer.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/ICheckpointer.sol) | 
+| [src/modules/interfaces/IDelegatedExtension.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/IDelegatedExtension.sol) | 
+| [src/modules/interfaces/IERC1155Receiver.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/IERC1155Receiver.sol) | 
+| [src/modules/interfaces/IERC1271.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/IERC1271.sol) | 
+| [src/modules/interfaces/IERC223Receiver.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/IERC223Receiver.sol) | 
+| [src/modules/interfaces/IERC721Receiver.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/IERC721Receiver.sol) | 
+| [src/modules/interfaces/IERC777Receiver.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/IERC777Receiver.sol) | 
+| [src/modules/interfaces/IEntryPoint.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/IEntryPoint.sol) | 
+| [src/modules/interfaces/IPartialAuth.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/IPartialAuth.sol) | 
+| [src/modules/interfaces/ISapient.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/modules/interfaces/ISapient.sol) | 
+| [src/utils/Base64.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/utils/Base64.sol) | 
+| [src/utils/LibBytes.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/utils/LibBytes.sol) | 
+| [src/utils/LibOptim.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/utils/LibOptim.sol) | 
+| [src/utils/P256.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/utils/P256.sol) | 
+| [src/utils/WebAuthn.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/utils/WebAuthn.sol) | 
+| **Total Logic Contracts: 34** | 
+
+| File         |
+| ------------ |
+| [script/\*\*.\*\*](https://github.com/code-423n4/2025-10-sequence/tree/main/script) |
+| [src/Estimator.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/Estimator.sol) |
+| [src/Simulator.sol](https://github.com/code-423n4/2025-10-sequence/blob/main/src/Simulator.sol) |
+| [test/\*\*.\*\*](https://github.com/code-423n4/2025-10-sequence/tree/main/test) |
+| Total Contracts: 45 |
+
+## Roles
+
+# Executive Summary
+
+The audit of the Sequence Ecosystem Wallet codebase identified several issues across different severity levels. The findings include high, medium, low severity vulnerabilities, as well as informational notes and gas optimizations.
+For high and medium severity issues, proof of code (POC) exploits have been provided to demonstrate the potential impact of the vulnerabilities. Low severity issues and informational notes are documented for awareness and future improvements.
+
+## Issues found
+
+| Severity | Number of issues found |
+| -------- | ---------------------- |
+| High     | 3                     |
+| Medium   | 5                      |
+| Low      | 11                      |
+| Info     | 2                      |
+| Gas      | 0                      |
+| Total    | 21                     |
+
+# Findings
+
+## High
+
 ### [H-1] Missing Wallet Binding Enables Cross-Wallet Signature Replay in Session Calls
 
 **Description** `SessionSig.hashCallWithReplayProtection` computes the per-call digest as `keccak256(chainId, space, nonce, callIdx, Payload.hashCall(call))`, omitting the *verifying wallet address*. The digest is fed directly into ecrecover inside `SessionSig.recoverSignature` when reconstructing each CallSignature. 
@@ -138,6 +318,7 @@ contract ReplaySignature is ExtendedSessionTestBase {
 2. Alternatively, extend the signed pre-image to match the EIP-712 domain model `(chainId, verifyingContract, wallet, etc.)` so signatures cannot be replayed on contracts with a different msg.sender.
    
 3. Consider adding a second-level check in `SessionManager` that rejects signatures whose imageHash was not issued specifically for the calling wallet, rather than only verifying the recovered session signer.
+
 ### [H-2] Checkpointer Bypass Via Chained Signature Allows Evicted Signers to Maintain Wallet Access
 
 **Description** Consider a scenario where the top level signature flag is set to chained signature with no checkpointer bit set. In this case, the `recover` function in `BaseSig.sol` completely bypasses the checkpointer verification logic as for the chained signatures, `_ignoreCheckpointer` is set to true. Allowing attackers to:
@@ -306,6 +487,7 @@ Paste the following test case in `BaseSig.t.sol`
        return recoverChained(_payload, _checkpointer, snapshot, _signature[rindex:]);
      }
 ```
+
 ### [H-3] Signature Parsing Corruption in `recover()` When `_ignoreCheckpointer = true` Allows Complete Authentication Bypass
 
 **Description** The `BaseSigImp.recover()` function contains a critical parsing vulnerability when processing signatures with the checkpointer flag set but `_ignoreCheckpointer = true`. Due to improper pointer arithmetic, the function fails to advance the read index past checkpointer data when it should be ignored, causing subsequent signature components `(checkpoint, threshold, and merkle tree data)` to be read from incorrect positions in the signature byte array.
@@ -379,6 +561,7 @@ Paste the following test case in `BaseSig.t.sol`
 
 **Recommended mitigation** Always consume the declared checkpointer payload, even when `_ignoreCheckpointer` is true. Read the 3-byte length, advance rindex by that many bytes, and (optionally) copy the data into a scratch buffer so the decoder stays aligned.
 
+## Medium
 ### [M-1] Relayer can escalate privileges by swapping unsigned call flag in `recoverSignature` of `SessionSig.sol`
 
 **Description** The session system's call signatures do not cryptographically bind to the specific permission or attestation being used for validation. The hashCallWithReplayProtection() function computes signature digests using only call parameters and replay protection fields, excluding the permission/attestation selection flag byte. 
@@ -523,7 +706,7 @@ function hashCallWithReplayProtection(
             payload.space,
             payload.nonce,
             callIdx,
-+           callFlag,  // ✅ Include flag in signature
++           callFlag,  // Include flag in signature
             Payload.hashCall(payload.calls[callIdx])
         )
     );
@@ -544,7 +727,7 @@ For stronger protection, include a hash of the specific permission rules or atte
 *Documentation of ERC-4337 states:*
 
 ```
-If the factory does use CREATE2 0xF5 or some other deterministic method to create the Account, it’s expected to return the Account address even if it had already been created. 
+If the factory does use CREATE2 0xF5 or some other deterministic method to create the Account, it is expected to return the Account address even if it had already been created. 
 ```
 
 Additionally, as per the current design of Sequence wallet, **Sequence wallets fully support ERC-4337 account abstraction** as stated in the documentation. Therefore, the factory should allow multiple calls to `deploy` with the same parameters to return the existing wallet address instead of reverting.
@@ -886,208 +1069,57 @@ function signatureValidation(
 
 **Recommended mitigation** Avoid the external self‑call and explicitly propagate the intended caller into signature validation so that static signatures bound to the entrypoint succeed under ERC‑4337.
 
-### [L-1] The NESTED flag implementation incorrectly masks bits in `recoverBranch()` of `BaseSig.sol`
+### [M-5] `recoverSapientSignature` of `BaseAuth.sol` returns a constant instead of signer image hash, breaking sapient signature recovery
 
-**Description** The `NESTED` flag implementation incorrectly masks bits in `recoverBranch()`, swapping the interpretation of external *weight* and *internal threshold*. While the documentation and other flag types **(FLAG_SIGNATURE_SAPIENT, FLAG_SIGNATURE_ERC1271)** consistently use lower 2 bits for weight and upper 2 bits for size/threshold, the `NESTED` flag code reverses this order, creating a critical logic error.
+**Description** BaseAuth.sol's `recoverSapientSignature` function is intended to recover the signer's image hash from a Sapient signature. However, the function currently returns a constant value of `bytes32(1)` instead of the actual recovered image hash. This flaw prevents the correct verification of Sapient signatures, as the recovered image hash is essential for validating the signature against the wallet's configuration.
 
-*Documentation pattern followed by all flags:*
-
-ERC-1271: [sizeSize][weight] - upper 2 bits = Signature size size, lower 2 bits = weight
-Sapient: [sizeSize][weight] - upper 2 bits = Signature size size, lower 2 bits = weight
-NESTED: [internalThreshold][externalWeight] - upper 2 bits = threshold, lower 2 bits = weight
-
-Code Example from `recoverBranch()`
-
+Code Example from `BaseAuth.sol`:
 ```solidity
-function recoverBranch(
+  function recoverSapientSignature(
     Payload.Decoded memory _payload,
-    bytes32 _opHash,
     bytes calldata _signature
-  ) internal view returns (uint256 weight, bytes32 root) {
-[...]
-  if (flag == FLAG_NESTED) {
-          // Unused free bits:
-          // - XX00 : Weight (00 = dynamic, 01 = 1, 10 = 2, 11 = 3)
-          // - 00XX : Threshold (00 = dynamic, 01 = 1, 10 = 2, 11 = 3)
+  ) external view returns (bytes32) {
+    // Copy parent wallets + add caller at the end
+    address[] memory parentWallets = new address[](_payload.parentWallets.length + 1);
 
-          // Enter a branch of the signature merkle tree
-          // but with an internal threshold and an external fixed weight
-        
-   @>     uint256 externalWeight = uint8(firstByte & 0x0c) >> 2;
-          if (externalWeight == 0) {
-            (externalWeight, rindex) = _signature.readUint8(rindex);
-          }
+    for (uint256 i = 0; i < _payload.parentWallets.length; i++) {
+      parentWallets[i] = _payload.parentWallets[i];
+    }
+    parentWallets[_payload.parentWallets.length] = msg.sender;
+    _payload.parentWallets = parentWallets;
 
-    @>     uint256 internalThreshold = uint8(firstByte & 0x03);
-          if (internalThreshold == 0) {
-            (internalThreshold, rindex) = _signature.readUint16(rindex);
-          }
-
-          uint256 size;
-          (size, rindex) = _signature.readUint24(rindex);
-          uint256 nrindex = rindex + size;
-
-          (uint256 internalWeight, bytes32 internalRoot) = recoverBranch(_payload, _opHash, _signature[rindex:nrindex]);
-          rindex = nrindex;
-
-          if (internalWeight >= internalThreshold) {
-            weight += externalWeight;
-          }
-
-          bytes32 node = _leafForNested(internalRoot, internalThreshold, externalWeight);
-          root = root != bytes32(0) ? LibOptim.fkeccak256(root, node) : node;
-          continue;
-        }
-[...]
-}
-```
-
-**Impact**
-1. Confusion among security researchers regarding the correctness of bits allocation.
-2. If the documentation is correct over code then this is a critical bug leading to complete breakdown of nested signature security model else this shall be considered a low severity issue.
-3. Causing the rejection of valid signatures while invalid ones are accepted.
-
-**Recommended mitigation**
-1. Following the layout specified in the documentation while aligning with other flags, this code should be updated as
-   
-```diff
-if (flag == FLAG_NESTED) {
--      uint256 externalWeight = uint8(firstByte & 0x0c) >> 2;
-+.     uint256 externalWeight = uint8(firstByte & 0x03);
-          if (externalWeight == 0) {
-            (externalWeight, rindex) = _signature.readUint8(rindex);
-          }
-
--         uint256 internalThreshold = uint8(firstByte & 0x03);
-+         uint256 internalThreshold = uint8(firstByte & 0x0c) >> 2;
-          if (internalThreshold == 0) {
-            (internalThreshold, rindex) = _signature.readUint16(rindex);
-          }
-}
-```
-
-2. Update the documentation to clearly specify the bit allocation for the `NESTED` flag, ensuring consistency with other flag types if the current implementation is intended.
-
-### [L-2] Potential Stack Exhaustion due to recursive structure
-
-**Description** The recursive structure of `_recoverBranch` of `Recovery.sol`, `recoverBranch` of `BaseSig.sol` and presents a potential risk of exhausting the stack on the Ethereum virtual machine. A limited stack size constrains the Ethereum virtual machine, and each recursive invocation consumes a specific portion of the stack space. In scenarios where the recursion depth is substantial, mainly when the recursive function utilizes a significant number of local variables, as in `_recoverBranch` and `recoverBranch`, this may surpass the Ethereum virtual machine’s stack limit, resulting in transaction failure.
-
-Code Example from `Recovery.sol`
-
-```solidity
-  function _recoverBranch(
-    address _wallet,
-    bytes32 _payloadHash,
-    bytes calldata _signature
-  ) internal view returns (bool verified, bytes32 root) {
-    uint256 rindex;
-
-    while (rindex < _signature.length) {
-      
-[...]
-      if (flag == FLAG_BRANCH) {
-        // Read size
-        uint256 size;
-        (size, rindex) = _signature.readUint24(rindex);
-
-        // Enter a branch of the signature merkle tree
-        uint256 nrindex = rindex + size;
-@>       (bool nverified, bytes32 nroot) = _recoverBranch(_wallet, _payloadHash, _signature[rindex:nrindex]);
-        rindex = nrindex;
-
-        verified = verified || nverified;
-        root = LibOptim.fkeccak256(root, nroot);
-        continue;
-      }
-
-      revert InvalidSignatureFlag(flag);
+    (bool isValid,) = signatureValidation(_payload, _signature);
+    if (!isValid) {
+      revert InvalidSapientSignature(_payload, _signature);
     }
 
-    return (verified, root);
+@>   return bytes32(uint256(1));
   }
 ```
 
-Code Example from `BaseSig.sol`
+**Impact** 
+1. Sapient signatures cannot be correctly verified, leading to potential rejection of valid signatures.
+2. Users relying on Sapient signatures may experience failures in transaction execution or configuration updates.
+3. This issue undermines the correct of merkle image reconstruction, a core invariant of the system.
 
-```solidity
-  function recoverBranch(
-    Payload.Decoded memory _payload,
-    bytes32 _opHash,
-    bytes calldata _signature
-  ) internal view returns (uint256 weight, bytes32 root) {
-
-    [...]
-      // Branch (0x04)
-        if (flag == FLAG_BRANCH) {
-          // Free bits layout:
-          // - XXXX : Size size (0000 = 0 byte, 0001 = 1 byte, 0010 = 2 bytes, ...)
-
-          // Read size
-          uint256 sizeSize = uint8(firstByte & 0x0f);
-          uint256 size;
-          (size, rindex) = _signature.readUintX(rindex, sizeSize);
-
-          // Enter a branch of the signature merkle tree
-          uint256 nrindex = rindex + size;
-
-@>        (uint256 nweight, bytes32 node) = recoverBranch(_payload, _opHash, _signature[rindex:nrindex]);
-          rindex = nrindex;
-
-          weight += nweight;
-          root = LibOptim.fkeccak256(root, node);
-          continue;
-        }
-    [...]
-  }
-```
-It is important to note that this limit may differ among various Ethereum virtual machine implementations or network setups. Consequently, opting for loop-based structures over deep recursion offers a better solution to reduce stack usage.
-
-**Impact** Unbounded recursion depth leading to a *stack too deep error* or, more critically, *gas exhaustion and block gas limit denial-of-service*.
+**Proof of Concepts**
+Find the POC for this finding in [RecoverSapientSignatureConstant.sol](test/modules/RecoverSapientSignatureConstant.sol)
 
 **Recommended mitigation**
+Return the actual signer image hash from `BaseAuth.recoverSapientSignature()` to conform to *ISapient* and maintain merkle image correctness.
 
-1. The primary and most critical fix is to *add depth checks* to the recursive functions to prevent excessive recursion. This can be achieved by introducing a new currentDepth parameter that limits how deep the recursion can go.
+Two straightforward approaches:
+- Extend `signatureValidation(...)` to also return the derived imageHash (it already computes it in the dynamic branch via `BaseSig.recover(...))` and return that from `recoverSapientSignature()`.
+- Or directly call `BaseSig.recover(_payload, _signature, false, address(0))` inside `recoverSapientSignature()` and return the imageHash.
 
-```diff
-function recoverBranch(
-    Payload.Decoded memory _payload,
-    bytes32 _opHash,
-    bytes calldata _signature,
-+   uint256 _currentDepth  // Add depth parameter
-) internal view returns (uint256 weight, bytes32 root) {
-    
-+   // Enforce maximum depth
-+   uint256 constant MAX_RECURSION_DEPTH = 64; // Choose based on expected use case
-+   require(_currentDepth < MAX_RECURSION_DEPTH, "Recursion depth exceeded");
-    
-    [...]
-    
-    if (flag == FLAG_BRANCH) {
-        .
-        .
-        .
-        // Recursive call with incremented depth
-        (uint256 nweight, bytes32 node) = recoverBranch(
-            _payload, 
-            _opHash, 
-            _signature[rindex:nrindex], 
-+           _currentDepth + 1  // Increment depth
-        );
-        .
-        .
-        .
-    }
-    [...]
-}
-```
-2. Alternatively, refactor the recursive functions into iterative ones using explicit stacks or queues to manage state, thereby eliminating recursion altogether. This approach is more complex but effectively mitigates stack exhaustion risks.
 
-### [L-3] Nested `staticcall()` revert in `WebAuthn` library results in incorrect messageHash
+## Low 
+### [L-1] Nested `staticcall()` revert in `WebAuthn` library results in incorrect messageHash
 
-**Description** In the `WebAuthn` library, the `verify()` function checks that a valid P256 signature has been provided over the message hash `sha256(authenticatorData ‖ sha256(clientDataJSON))`. This message hash is calculated using the following logic:
+**Description** In the `WebAuthn` library, the `verify()` function checks that a valid P256 signature has been provided over the message hash `sha256(authenticatorData || sha256(clientDataJSON))`. This message hash is calculated using the following logic:
 
 1. Compute `sha256(clientDataJSON)`
-2. Compute `sha256(authenticatorData ‖ sha256(clientDataJSON))`
+2. Compute `sha256(authenticatorData || sha256(clientDataJSON))`
 
 Code Example from `WebAuthn.sol`
 
@@ -1097,7 +1129,7 @@ Code Example from `WebAuthn.sol`
         let e := add(p, l) // Location of the word after `authenticatorData`.
         let w := mload(e) // Cache the word after `authenticatorData`.
         // 19. Compute `sha256(clientDataJSON)`.
-        // 20. Compute `sha256(authenticatorData ‖ sha256(clientDataJSON))`.
+        // 20. Compute `sha256(authenticatorData || sha256(clientDataJSON))`.
         // forgefmt: disable-next-item
   @>    messageHash := mload(staticcall(gas(),
                     shl(1, staticcall(gas(), 2, o, n, e, 0x20)), p, add(l, 0x20), 0x01, 0x20))
@@ -1107,7 +1139,7 @@ Code Example from `WebAuthn.sol`
       }
 ```
 
-This calculation involves two nested calls to the SHA256 precompile. The inner call calculates `sha256(clientDataJSON)`, and the outer call calculates `sha256(authenticatorData ‖ sha256(clientDataJSON))`. After both calls, there is a `returndatasize()` check, which ensures that the outer `staticcall()` succeeded, but does not guarantee that the inner `staticcall()` succeeded.
+This calculation involves two nested calls to the SHA256 precompile. The inner call calculates `sha256(clientDataJSON)`, and the outer call calculates `sha256(authenticatorData || sha256(clientDataJSON))`. After both calls, there is a `returndatasize()` check, which ensures that the outer `staticcall()` succeeded, but does not guarantee that the inner `staticcall()` succeeded.
 
 Since the SHA256 precompile's gas cost depends on its input size, the inner `staticcall()` can fail with an out-of-gas error while the outer `staticcall()` succeeds.
 
@@ -1124,14 +1156,14 @@ Since this result would not be a direct SHA256 hash, it's unlikely for an attack
 + let innerSuccess := staticcall(gas(), 2, o, n, e, 0x20)
 if iszero(returndatasize()) { invalid() }
 
-// Compute sha256(authenticatorData ‖ sha256(clientDataJSON))
+// Compute sha256(authenticatorData || sha256(clientDataJSON))
 let outerSuccess := staticcall(gas(), 2, p, add(l, 0x20), 0x01, 0x20)
 if iszero(returndatasize()) { invalid() }
 
 messageHash := mload(e)
 ``` 
 
-### [L-4] `ERC4337v07` Cannot Receive Native Token
+### [L-2] `ERC4337v07` Cannot Receive Native Token
 
 **Description** The `ERC4337v07` contract appears to support native token transfer through its `validateUserOp` function by way of depositing **missingAccountFunds** to *entryPoint* contract. This field allows specifying an ETH value to be sent with `validateUserOp` operation. However, the contract itself is not capable of receiving ETH due to two related limitations:
 
@@ -1147,7 +1179,7 @@ messageHash := mload(e)
 2. Additionally (or alternatively), exposing a *receive()* function or marking the existing fallback as payable would enable native token reception. Either approach would resolve the inconsistency and allow the smart wallet to support ETH-based workflows as designed.
 
 
-### [L-5] Using `ecrecover` directly vulnerable to signature malleability
+### [L-3] Using `ecrecover` directly vulnerable to signature malleability
 
 **Description**  The `ecrecover` function is susceptible to signature malleability. This means that the same message can be signed in multiple ways, allowing an attacker to change the message signature without invalidating it. This can lead to unexpected behavior in smart contracts, such as the loss of funds or the ability to bypass access control. 
 
@@ -1189,7 +1221,7 @@ messageHash := mload(e)
 
 **Recommended mitigation** Consider using OpenZeppelin's ECDSA library instead of the built-in function.
 
-### [L-6] Missing validation for zero address in constructor parameter of `ERC4337v07` contract
+### [L-4] Missing validation for zero address in constructor parameter of `ERC4337v07` contract
 
 **Description** The constructor accepts an `_entryPoint` address parameter but does not validate whether it is the zero address. Passing an invalid (zero) address would lead to an unusable contract instance.
 
@@ -1206,7 +1238,7 @@ constructor(address _entryPoint){
 }
 ```
 
-### [L-7] Lack of domain separation in passkey root calculation in `_rootForPasskey` allows for cross-implementation image hash equivalence
+### [L-5] Lack of domain separation in passkey root calculation in `_rootForPasskey` allows for cross-implementation image hash equivalence
 
 **Description** : The `_rootForPasskey` function computes a configuration root using only the **public key coordinates (x,y), verification flag, and metadata** without including any domain separation parameters. As a result, any other signer implementation that happens to combine the same four inputs with the same hash structure can return the same root for the same inputs.
 
@@ -1353,7 +1385,7 @@ function _rootForPasskey(
 }
 ```
 
-### [L-8] Zero-address signer accepted in recovery queue via `queuePayload` of `Recovery.sol` allows unauthorized queue entries with signers as `address(0)`
+### [L-6] Zero-address signer accepted in recovery queue via `queuePayload` of `Recovery.sol` allows unauthorized queue entries with signers as `address(0)`
 
 **Description** The recovery queue authorization mechanism incorrectly accepts ECDSA signature verification failures as valid signatures when the provided signer is `address(0)`. This allows any caller to queue recovery payloads via `queuePayload` for any wallet without possessing valid signatures, potentially enabling storage bloat attacks and unauthorized queue entries.
 
@@ -1454,7 +1486,7 @@ function isValidSignature(
   }
 ```
 
-### [L-9] Unbounded growth of recovery queue via `queuePayload` allows storage bloat
+### [L-7] Unbounded growth of recovery queue via `queuePayload` allows storage bloat
 
 **Description** The Recovery contract maintains a `queuedPayloadHashes` mapping that stores arrays of payload hashes for each wallet-signer combination. When `queuePayload()` is called, it performs signature validation and then unconditionally appends the new payload hash to the corresponding array without any bounds checking or cleanup logic.
 
@@ -1472,7 +1504,7 @@ While the contract's core functionality relies on `timestampForQueuedPayload` lo
 
 2. Alternatively, consider implementing a time-based expiration system that removes payload hashes after a reasonable period, or add administrative functions to prune processed or stale entries. The specific approach should balance storage efficiency with the protocol's operational requirements for payload queuing and processing.
 
-### [L-10] `_dispatchGuest` of `Guest.sol` fails silently via behaviorOnError = 3 leading to wrong emission of `Guest.CallSucceeded` event
+### [L-8] `_dispatchGuest` of `Guest.sol` fails silently via behaviorOnError equal to 3 leading to wrong emission of `Guest.CallSucceeded` event
 
 **Description** The `_dispatchGuest` function in `Guest.sol` mishandles sub-calls with `behaviorOnError = 3`. The `Payload.fromPackedCalls` function in `Payload.sol` extracts `behaviorOnError` as `(flags >> 6) & 0x03`, allowing values 0, 1, 2, or 3.
 
@@ -1535,7 +1567,7 @@ Find the proof of code in the test file [`Guest.t.sol`](test/modules/guest/Guest
     });
     // Call flags = 0xC0 to 0xC3 for behaviorOnError = 3
     // We want self call to avoid providing address, so bit 0 = 1
-    // behaviorOnError = 3 → bits 6-7 = 11
+    // behaviorOnError = 3 -> bits 6-7 = 11
     // So: 11000001 = 0xC1
     uint8 callFlags = 0xC2; // Self call + behaviorOnError = 3
     bytes memory packed = abi.encodePacked(
@@ -1556,7 +1588,7 @@ Find the proof of code in the test file [`Guest.t.sol`](test/modules/guest/Guest
 </details>
 
 **Recommended mitigation**
-Add default case or require behaviorOnError ≤ 2:
+Add default case or require behaviorOnError <= 2:
 
 ```solidity
 if (behaviorOnError > 2) revert InvalidBehavior();
@@ -1572,7 +1604,7 @@ if (!success) {
 }
 ```
 
-### [L-11] `Guest.sol` allows anyone to drain ETH from its balance through unauthenticated payable fallback
+### [L-9] `Guest.sol` allows anyone to drain ETH from its balance through unauthenticated payable fallback
 
 **Description** The *Guest contract* implements a **payable fallback function** with no access control that decodes arbitrary payloads and executes calls via `LibOptim.call()`. While delegate calls are explicitly blocked, regular calls with ETH value transfers are permitted without restriction enabling any external account to invoke the fallback and transfer ETH from the Guest contract's balance to arbitrary addresses.
 
@@ -1666,11 +1698,11 @@ function test_fallback_For_Funds_Withdrawal_By_UnAuthorized_Users() external {
    
 3. Alternatively, implement a whitelist mechanism to restrict which addresses can invoke the fallback function for value transfers.
 
-### [L-12] Gas precheck doesn't account for `EIP-150's 63/64 rule`, causing calls to receive less gas than expected
+### [L-10] Gas precheck doesn't account for `EIP-150's 63/64 rule`, causing calls to receive less gas than expected
 
 **Description** The gas precheck logic in `_dispatchGuest` of `Guest.sol`  and `_execute` of `Calls.sol` calculates the gas to forward to sub-calls based on the `gasLimit` specified in the payload. If `gasLimit` is zero, it forwards all remaining gas (`gasleft()`). However, this does not account for *EIP-150's 63/64 rule*, which reduces the gas available to a called contract to 63/64 of the gas sent to it.
 
-When a user specifies gasLimit = X, the check passes if gasleft() >= X, but the actual call may only receive approximately X * 63/64 ≈ 0.984X gas. For calls requiring exactly X gas, this -1.6% shortfall causes unexpected out-of-gas failures despite passing the precheck.
+When a user specifies gasLimit = X, the check passes if gasleft() >= X, but the actual call may only receive approximately X * 63/64 =  ~0.984X gas. For calls requiring exactly X gas, this -1.6% shortfall causes unexpected out-of-gas failures despite passing the precheck.
 
 Code Example from `Guest.sol`:
 
@@ -1702,7 +1734,7 @@ Consider one of the following approaches:
 
 2. Update documentation and error messages to clarify that gasLimit is a soft limit and callers should add a buffer (e.g., 2%) to account for EIP-150 reductions.
 
-### [L-13] Recovery module lacks mechanism to remove expired or executed payloads from `queuedPayloadHashes` in `Recovery.sol`
+### [L-11] Recovery module lacks mechanism to remove expired or executed payloads from `queuedPayloadHashes` in `Recovery.sol`
 
 **Description** The `Recovery` module maintains a mapping `queuedPayloadHashes` that stores arrays of payload hashes for each wallet-signer combination. When a payload is queued via `queuePayload()`, its hash is appended to the corresponding array. However, there is no mechanism to remove payload hashes from this array once they have been executed or have expired.
 
@@ -1766,3 +1798,201 @@ function removeExpiredPayloads(
 }
 ```
 **Note:** This function should include appropriate access controls to prevent unauthorized removals.
+
+## Informational
+
+### [I-1] The NESTED flag implementation incorrectly masks bits in `recoverBranch()` of `BaseSig.sol`
+
+**Description** The `NESTED` flag implementation incorrectly masks bits in `recoverBranch()`, swapping the interpretation of external *weight* and *internal threshold*. While the documentation and other flag types **(FLAG_SIGNATURE_SAPIENT, FLAG_SIGNATURE_ERC1271)** consistently use lower 2 bits for weight and upper 2 bits for size/threshold, the `NESTED` flag code reverses this order, creating a critical logic error.
+
+*Documentation pattern followed by all flags:*
+
+ERC-1271: [sizeSize][weight] - upper 2 bits = Signature size size, lower 2 bits = weight
+Sapient: [sizeSize][weight] - upper 2 bits = Signature size size, lower 2 bits = weight
+NESTED: [internalThreshold][externalWeight] - upper 2 bits = threshold, lower 2 bits = weight
+
+Code Example from `recoverBranch()`
+
+```solidity
+function recoverBranch(
+    Payload.Decoded memory _payload,
+    bytes32 _opHash,
+    bytes calldata _signature
+  ) internal view returns (uint256 weight, bytes32 root) {
+[...]
+  if (flag == FLAG_NESTED) {
+          // Unused free bits:
+          // - XX00 : Weight (00 = dynamic, 01 = 1, 10 = 2, 11 = 3)
+          // - 00XX : Threshold (00 = dynamic, 01 = 1, 10 = 2, 11 = 3)
+
+          // Enter a branch of the signature merkle tree
+          // but with an internal threshold and an external fixed weight
+        
+   @>     uint256 externalWeight = uint8(firstByte & 0x0c) >> 2;
+          if (externalWeight == 0) {
+            (externalWeight, rindex) = _signature.readUint8(rindex);
+          }
+
+    @>     uint256 internalThreshold = uint8(firstByte & 0x03);
+          if (internalThreshold == 0) {
+            (internalThreshold, rindex) = _signature.readUint16(rindex);
+          }
+
+          uint256 size;
+          (size, rindex) = _signature.readUint24(rindex);
+          uint256 nrindex = rindex + size;
+
+          (uint256 internalWeight, bytes32 internalRoot) = recoverBranch(_payload, _opHash, _signature[rindex:nrindex]);
+          rindex = nrindex;
+
+          if (internalWeight >= internalThreshold) {
+            weight += externalWeight;
+          }
+
+          bytes32 node = _leafForNested(internalRoot, internalThreshold, externalWeight);
+          root = root != bytes32(0) ? LibOptim.fkeccak256(root, node) : node;
+          continue;
+        }
+[...]
+}
+```
+
+**Impact**
+1. Confusion among security researchers regarding the correctness of bits allocation.
+2. If the documentation is correct over code then this is a critical bug leading to complete breakdown of nested signature security model else this shall be considered a low severity issue.
+3. Causing the rejection of valid signatures while invalid ones are accepted.
+
+**Recommended mitigation**
+1. Following the layout specified in the documentation while aligning with other flags, this code should be updated as
+   
+```diff
+if (flag == FLAG_NESTED) {
+-      uint256 externalWeight = uint8(firstByte & 0x0c) >> 2;
++.     uint256 externalWeight = uint8(firstByte & 0x03);
+          if (externalWeight == 0) {
+            (externalWeight, rindex) = _signature.readUint8(rindex);
+          }
+
+-         uint256 internalThreshold = uint8(firstByte & 0x03);
++         uint256 internalThreshold = uint8(firstByte & 0x0c) >> 2;
+          if (internalThreshold == 0) {
+            (internalThreshold, rindex) = _signature.readUint16(rindex);
+          }
+}
+```
+
+2. Update the documentation to clearly specify the bit allocation for the `NESTED` flag, ensuring consistency with other flag types if the current implementation is intended.
+
+### [I-2] Potential Stack Exhaustion due to recursive structure
+
+**Description** The recursive structure of `_recoverBranch` of `Recovery.sol`, `recoverBranch` of `BaseSig.sol` and presents a potential risk of exhausting the stack on the Ethereum virtual machine. A limited stack size constrains the Ethereum virtual machine, and each recursive invocation consumes a specific portion of the stack space. In scenarios where the recursion depth is substantial, mainly when the recursive function utilizes a significant number of local variables, as in `_recoverBranch` and `recoverBranch`, this may surpass the Ethereum virtual machine’s stack limit, resulting in transaction failure.
+
+Code Example from `Recovery.sol`
+
+```solidity
+  function _recoverBranch(
+    address _wallet,
+    bytes32 _payloadHash,
+    bytes calldata _signature
+  ) internal view returns (bool verified, bytes32 root) {
+    uint256 rindex;
+
+    while (rindex < _signature.length) {
+      
+[...]
+      if (flag == FLAG_BRANCH) {
+        // Read size
+        uint256 size;
+        (size, rindex) = _signature.readUint24(rindex);
+
+        // Enter a branch of the signature merkle tree
+        uint256 nrindex = rindex + size;
+@>       (bool nverified, bytes32 nroot) = _recoverBranch(_wallet, _payloadHash, _signature[rindex:nrindex]);
+        rindex = nrindex;
+
+        verified = verified || nverified;
+        root = LibOptim.fkeccak256(root, nroot);
+        continue;
+      }
+
+      revert InvalidSignatureFlag(flag);
+    }
+
+    return (verified, root);
+  }
+```
+
+Code Example from `BaseSig.sol`
+
+```solidity
+  function recoverBranch(
+    Payload.Decoded memory _payload,
+    bytes32 _opHash,
+    bytes calldata _signature
+  ) internal view returns (uint256 weight, bytes32 root) {
+
+    [...]
+      // Branch (0x04)
+        if (flag == FLAG_BRANCH) {
+          // Free bits layout:
+          // - XXXX : Size size (0000 = 0 byte, 0001 = 1 byte, 0010 = 2 bytes, ...)
+
+          // Read size
+          uint256 sizeSize = uint8(firstByte & 0x0f);
+          uint256 size;
+          (size, rindex) = _signature.readUintX(rindex, sizeSize);
+
+          // Enter a branch of the signature merkle tree
+          uint256 nrindex = rindex + size;
+
+@>        (uint256 nweight, bytes32 node) = recoverBranch(_payload, _opHash, _signature[rindex:nrindex]);
+          rindex = nrindex;
+
+          weight += nweight;
+          root = LibOptim.fkeccak256(root, node);
+          continue;
+        }
+    [...]
+  }
+```
+It is important to note that this limit may differ among various Ethereum virtual machine implementations or network setups. Consequently, opting for loop-based structures over deep recursion offers a better solution to reduce stack usage.
+
+**Impact** Unbounded recursion depth leading to a *stack too deep error* or, more critically, *gas exhaustion and block gas limit denial-of-service*.
+
+**Recommended mitigation**
+
+1. The primary and most critical fix is to *add depth checks* to the recursive functions to prevent excessive recursion. This can be achieved by introducing a new currentDepth parameter that limits how deep the recursion can go.
+
+```diff
+function recoverBranch(
+    Payload.Decoded memory _payload,
+    bytes32 _opHash,
+    bytes calldata _signature,
++   uint256 _currentDepth  // Add depth parameter
+) internal view returns (uint256 weight, bytes32 root) {
+    
++   // Enforce maximum depth
++   uint256 constant MAX_RECURSION_DEPTH = 64; // Choose based on expected use case
++   require(_currentDepth < MAX_RECURSION_DEPTH, "Recursion depth exceeded");
+    
+    [...]
+    
+    if (flag == FLAG_BRANCH) {
+        .
+        .
+        .
+        // Recursive call with incremented depth
+        (uint256 nweight, bytes32 node) = recoverBranch(
+            _payload, 
+            _opHash, 
+            _signature[rindex:nrindex], 
++           _currentDepth + 1  // Increment depth
+        );
+        .
+        .
+        .
+    }
+    [...]
+}
+```
+2. Alternatively, refactor the recursive functions into iterative ones using explicit stacks or queues to manage state, thereby eliminating recursion altogether. This approach is more complex but effectively mitigates stack exhaustion risks.
